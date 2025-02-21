@@ -59,6 +59,15 @@ function visualize_values(Q, grid_size=(5, 5))
     end
 end
 
+# ╔═╡ d050ddc3-ae28-4a2e-a006-e12381c9bfdd
+function log(debug_mode, messages...)
+	if debug_mode
+		for message in messages
+			println(message)
+		end
+	end
+end;
+
 # ╔═╡ 2ac49d21-013a-4190-842e-ac2312df66eb
 # ------------- Environment Set Up ------------------
 
@@ -193,7 +202,7 @@ end;
 # ╔═╡ f1a61a78-587b-4f33-850b-a3e917df0344
 begin
 	ε = 0.1
-	num_episodes = 30000
+	num_episodes = 100
 end;
 
 # ╔═╡ 07695400-a456-4c3f-b2f2-573fb5c1a817
@@ -425,7 +434,7 @@ visualize_values(Q_dql, (N, N))
 # Implementation: n-step SARSA, for n = 2 (page 147)
 
 # ╔═╡ 0c39847b-5d22-4131-bf59-0afb980ad0ee
-function n_step_sarsa(env::GridWorld, num_episodes::Int, ε::Float64, n::Int)
+function n_step_sarsa(env::GridWorld, num_episodes::Int, ε::Float64, n::Int, debug=false)
     ACTIONS = actions(env)
     # Q is state -> {action -> value} map:
     Q = Dict{Tuple{Int, Int}, Dict{Symbol, Float64}}()
@@ -441,6 +450,7 @@ function n_step_sarsa(env::GridWorld, num_episodes::Int, ε::Float64, n::Int)
 
     for episode in 1:num_episodes
         state = initialize_state(env.N)
+		# now we have to keep track of past states and actions estimates to update them:
         states = [state.player_pos]
         actions = [ε_greedy(Q, state.player_pos, ε, ACTIONS)]
         rewards = [0.0]
@@ -448,22 +458,25 @@ function n_step_sarsa(env::GridWorld, num_episodes::Int, ε::Float64, n::Int)
         T = env.T  # "T <- ∞" meaning maximum episode length
         t = 0
 
+		log(debug, "----------------------------------", "Episode $episode:", "Monster at $(state.monster_pos).", "Player at $(state.player_pos).", "Apple at $(state.apple_pos).")
+		
         while t < T
             # Take action Aₜ
-            action = actions[end]
-            new_state, reward, terminal = step(env, state, action)
+            action = actions[end] # below we push Aₜ₊₁
+            new_state, reward, caught_by_monster = step(env, state, action)
             push!(states, new_state.player_pos)
             push!(rewards, reward)
 
-            if terminal
-                T = t + 1  # Set T to the terminal time step
+            if caught_by_monster
+                T = t + 1
+				log(debug, "Monster at $(state.monster_pos) and player at $(state.player_pos) -> GG.")
             else
                 # Select and store Aₜ₊₁ ~ π(·|St+1)
                 push!(actions, ε_greedy(Q, new_state.player_pos, ε, ACTIONS))
             end
 
             τ = t - n + 1  # τ is the time whose estimate is being updated
-            if τ >= 0
+            if τ ≥ 0
                 # Calculate G: τ to τ+n
                 G = sum(rewards[Int(τ + i)] * env.γ^(i - 1) for i in 1:min(n, T - τ))
 
@@ -475,12 +488,14 @@ function n_step_sarsa(env::GridWorld, num_episodes::Int, ε::Float64, n::Int)
                 # Update Q(Sτ, Aτ)
                 Q[states[Int(τ + 1)]][actions[Int(τ + 1)]] += env.α * (G - Q[states[Int(τ + 1)]][actions[Int(τ + 1)]])
             end
-
+			
             t += 1
         end
 
         total_reward = sum(rewards)
         push!(rewards_per_episode, total_reward)
+		
+		log(debug, "Got $total_reward points this episode.")
     end
 
     return Q, rewards_per_episode
@@ -490,7 +505,7 @@ end
 env_sarsa_n2 = initialize_gridworld(N, T, γ, α)
 
 # ╔═╡ b414710f-5bd5-42ff-bb26-d2848ab27581
-Q_sarsa_n2, rewards_per_episode_sarsa_n2 = n_step_sarsa(env_sarsa_n2, num_episodes, ε, 2)
+Q_sarsa_n2, rewards_per_episode_sarsa_n2 = n_step_sarsa(env_sarsa_n2, num_episodes, ε, 2, true)
 
 # ╔═╡ 7af69459-6319-42ce-ba01-0993338cdace
 visualize_values(Q_sarsa_n2, (N, N))
@@ -502,7 +517,7 @@ visualize_values(Q_sarsa_n2, (N, N))
 env_sarsa_n4 = initialize_gridworld(N, T, γ, α)
 
 # ╔═╡ 211343d5-f420-4fed-abc3-c62f6f59acfb
-Q_sarsa_n4, rewards_per_episode_sarsa_n4 = n_step_sarsa(env_sarsa_n4, num_episodes, ε, 2)
+Q_sarsa_n4, rewards_per_episode_sarsa_n4 = n_step_sarsa(env_sarsa_n4, num_episodes, ε, 4, true)
 
 # ╔═╡ f78868be-c9cd-45e2-906a-99c6db39ba96
 visualize_values(Q_sarsa_n4, (N, N))
@@ -541,6 +556,9 @@ end
 
 # ╔═╡ 6bf7ec71-06fc-411e-8fa2-1856a46057e5
 # visualize_policy(Q_sarsa_n4, (N, N))
+
+# ╔═╡ 5e8ea938-2a7d-421c-b298-6f95817ea41f
+print(sum(rewards_per_episode_sarsa_n2))
 
 # ╔═╡ 4db83b79-39f8-4867-9ed7-809f61359cc3
 print(sum(rewards_per_episode_sarsa_n4))
@@ -1676,6 +1694,7 @@ version = "1.4.1+2"
 # ╠═7667ecaa-34ca-4e08-b290-110561fd1c8c
 # ╠═6635308e-4202-424e-890b-807d40a391ea
 # ╠═279fed15-f321-47d9-9cb3-7195571d084d
+# ╠═d050ddc3-ae28-4a2e-a006-e12381c9bfdd
 # ╠═2ac49d21-013a-4190-842e-ac2312df66eb
 # ╠═45369aa5-2f0c-4787-9492-c9f1e19ace7d
 # ╠═8fd48449-cf2f-45aa-b4a4-23f121ce16e3
@@ -1723,6 +1742,7 @@ version = "1.4.1+2"
 # ╠═a4f8f9b7-310a-4eff-be26-69a0951d9ed2
 # ╠═a4bcff37-c567-4310-8d3f-7f6785492d33
 # ╠═6bf7ec71-06fc-411e-8fa2-1856a46057e5
+# ╠═5e8ea938-2a7d-421c-b298-6f95817ea41f
 # ╠═4db83b79-39f8-4867-9ed7-809f61359cc3
 # ╠═017c6354-adde-489e-a175-0dd425def0ac
 # ╠═0555f33a-af79-4f12-9cf7-74b60544347d
