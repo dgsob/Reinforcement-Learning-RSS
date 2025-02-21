@@ -16,6 +16,16 @@ using Plots
 # ╔═╡ 35b6aa17-3d37-4e42-8594-759f181d1bfe
 # ----------- Preparation and helper functions ------
 
+# ╔═╡ ae62b0ba-ce37-40d6-9afb-8d00bbe92db0
+# ε-greedy policy for action selection
+function ε_greedy(Q, state, ε, actions)
+    if rand() < ε
+        return rand(actions)  # exploration
+    else
+        return argmax(a -> Q[state][a], actions) # exploitation
+    end
+end
+
 # ╔═╡ 279fed15-f321-47d9-9cb3-7195571d084d
 function visualize_values(Q, grid_size=(5, 5))
     rows, cols = grid_size
@@ -56,6 +66,35 @@ function visualize_values(Q, grid_size=(5, 5))
         if row % 4 == 0
             println("+" * "-"^(10 * cols - 1) * "+")  # Row separator
         end
+    end
+end
+
+# ╔═╡ a4f8f9b7-310a-4eff-be26-69a0951d9ed2
+function visualize_policy(Q, grid_size=(5, 5))
+    rows, cols = grid_size
+    grid = fill("", rows, cols)
+
+    # Map actions to arrows for visualization
+    arrows = Dict(:up => "↑", :down => "↓", :left => "←", :right => "→")
+
+    for i in 1:rows
+        for j in 1:cols
+            # Get the action with the highest Q-value for this state
+            best_action = argmax(a -> Q[(i, j)][a], keys(Q[(i, j)]))
+            grid[i, j] = arrows[best_action]
+        end
+    end
+
+    # Print the grid
+    println("Policy Visualization:")
+    println("+" * "---+" ^ cols)
+    for i in 1:rows
+        print("|")
+        for j in 1:cols
+            print(" $(grid[i, j]) |")
+        end
+        println()
+        println("+" * "---+" ^ cols)
     end
 end
 
@@ -187,117 +226,8 @@ function step(env::GridWorld, state::State, action::Symbol)
     return new_state, reward, terminal
 end
 
-# ╔═╡ 11337d2b-c1d6-465b-8b5f-31204a22a07e
-# ---------- Variables init -----------
-
-# ╔═╡ cad3c032-7623-46ac-ad1c-0742d8dc914e
-# Initialize state variables
-begin
-	N = 5 # small remark: it's {1, 2, 3, 4, 5} in our case, not {0, 1, 2, 3, 4} 
-	T = 30
-	γ = 0.9
-	α = 0.1
-end;
-
-# ╔═╡ f1a61a78-587b-4f33-850b-a3e917df0344
-begin
-	ε = 0.1
-	num_episodes = 100
-end;
-
-# ╔═╡ 07695400-a456-4c3f-b2f2-573fb5c1a817
-# ----- Testing the env with a random policy ------
-
-# ╔═╡ c2a07cee-e83e-44f1-b6d9-1865a11de913
-# env = initialize_gridworld(N, T, γ, α)
-
-# ╔═╡ 6b78b6d4-8e33-41ac-aa01-a2f30d946c2b
-# state = initialize_state(N)
-
-# ╔═╡ e5668bc3-eeca-4354-88aa-3c39b66ec2d4
-# for t in 1:T
-#     action = rand(actions(env)) 
-#     new_state, reward, terminal = step(env, state, action)
-#     println("Step $t: Action = $action, Reward = $reward, Terminal = $terminal")
-#     state = new_state
-#     if terminal
-#         println("Episode ended at step $t")
-#         break
-#     end
-# end
-
 # ╔═╡ b9ec071d-b40a-4fad-8c34-72fa3877bca2
 # -------- Implementation: SARSA (page 130) ---------
-
-# ╔═╡ ae62b0ba-ce37-40d6-9afb-8d00bbe92db0
-# ε-greedy policy for action selection
-function ε_greedy(Q, state, ε, actions)
-    if rand() < ε
-        return rand(actions)  # exploration
-    else
-        return argmax(a -> Q[state][a], actions) # exploitation
-    end
-end
-
-# ╔═╡ 462988ce-b490-415c-9105-b23a2d6a2de2
-function sarsa(env::GridWorld, num_episodes::Int, ε::Float64)
-	ACTIONS = actions(env)
-	# Q is state -> {action -> value} map:
-	Q = Dict{Tuple{Int, Int}, Dict{Symbol, Float64}}()
-
-    # Initialize Q(s, a) arbitrarily
-    for i in 1:N
-        for j in 1:N
-            Q[(i, j)] = Dict(a => 0.0 for a in ACTIONS)
-        end
-    end
-	
-    rewards_per_episode = []
-
-    for episode in 1:num_episodes
-        state = initialize_state(env.N)
-        total_reward = 0.0
-
-        action = ε_greedy(Q, state.player_pos, ε, ACTIONS)
-
-        for t in 1:env.T
-            # Take action A, observe R, S'
-            new_state, reward, terminal = step(env, state, action)
-            total_reward += reward
-
-            # Choose A' from S' using ε-greedy policy
-            new_action = ε_greedy(Q, new_state.player_pos, ε, ACTIONS)
-
-            # Update Q-value using SARSA update rule
-            Q[state.player_pos][action] += env.α * (reward + env.γ * Q[new_state.player_pos][new_action] - Q[state.player_pos][action])
-
-            # Update state and action
-            state = new_state
-            action = new_action
-
-            # Break if terminal state (monster caught us) is reached
-            if terminal
-                break
-            end
-        end
-
-        push!(rewards_per_episode, total_reward)
-    end
-
-    return Q, rewards_per_episode
-end
-
-# ╔═╡ 8011f631-a210-4ddb-8b34-a9f495a85e81
-env_sarsa = initialize_gridworld(N, T, γ, α)
-
-# ╔═╡ dbae9769-94a7-4303-a541-973037f1be18
-Q_sarsa, rewards_per_episode_sarsa = sarsa(env_sarsa, num_episodes, ε)
-
-# ╔═╡ 6713c22c-bdf7-41ac-82a9-21ab75be6c93
-# plot(rewards_per_episode_sarsa, xlabel="Episode", ylabel="Total Reward", label="SARSA", title="Learning Curve")
-
-# ╔═╡ 2c81a0b2-c56a-4a0b-84e9-28a25326e5b3
-visualize_values(Q_sarsa, (N, N))
 
 # ╔═╡ c3015524-5b2c-4919-9d0b-1fd1c5bc478e
 # ------- Implementation: Q-Learning (page 131) -----
@@ -347,15 +277,6 @@ function q_learning(env::GridWorld, num_episodes::Int, ε::Float64)
 
     return Q, rewards_per_episode
 end
-
-# ╔═╡ 0f9f4f35-0cf8-4f80-9054-9d03259f81b6
-env_ql = initialize_gridworld(N, T, γ, α)
-
-# ╔═╡ a1d63f5b-c751-4004-9cad-dbd16bfc1257
-Q_ql, rewards_per_episode_ql = sarsa(env_ql, num_episodes, ε)
-
-# ╔═╡ e6bb8f04-e940-40bb-97ea-3633dbae937e
-visualize_values(Q_ql, (N, N))
 
 # ╔═╡ 3c9b873c-b895-43af-8244-48bb66f2aaf0
 # --- Implementation: Double Q-Learning (page 136) --
@@ -421,17 +342,8 @@ function double_q_learning(env::GridWorld, num_episodes::Int, ε::Float64)
     return Q, rewards_per_episode
 end
 
-# ╔═╡ c45e66a3-aa03-4868-bc9a-47a9e6172eca
-env_dql = initialize_gridworld(N, T, γ, α)
-
-# ╔═╡ 74b2332d-43bb-487a-9401-bc366aa9451f
-Q_dql, rewards_per_episode_dql = sarsa(env_dql, num_episodes, ε)
-
-# ╔═╡ 9582e4b3-f1cf-4a62-b2d1-8384a6ed2a1b
-visualize_values(Q_dql, (N, N))
-
 # ╔═╡ 81cade4e-0e5c-4b57-9265-8d5f8b6df1a5
-# Implementation: n-step SARSA, for n = 2 (page 147)
+# ----- Implementation: n-step SARSA (page 147) -----
 
 # ╔═╡ 0c39847b-5d22-4131-bf59-0afb980ad0ee
 function n_step_sarsa(env::GridWorld, num_episodes::Int, ε::Float64, n::Int, debug=false)
@@ -450,130 +362,179 @@ function n_step_sarsa(env::GridWorld, num_episodes::Int, ε::Float64, n::Int, de
 
     for episode in 1:num_episodes
         state = initialize_state(env.N)
-		# now we have to keep track of past states and actions estimates to update them:
-        states = [state.player_pos]
-        actions = [ε_greedy(Q, state.player_pos, ε, ACTIONS)]
-        rewards = [0.0]
+        action = ε_greedy(Q, state.player_pos, ε, ACTIONS)
 
-        T = env.T  # "T <- ∞" meaning maximum episode length
+        # Episode history
+        states = [state.player_pos]
+        actions = [action]
+        rewards = []
+
+        T = env.T  # Max episode length
         t = 0
 
-		log(debug, "----------------------------------", "Episode $episode:", "Monster at $(state.monster_pos).", "Player at $(state.player_pos).", "Apple at $(state.apple_pos).")
+        log(debug, "----------------------------------", 
+            "Episode $episode:", 
+            "Monster at $(state.monster_pos).", 
+            "Player at $(state.player_pos).", 
+            "Apple at $(state.apple_pos).")
 		
         while t < T
-            # Take action Aₜ
-            action = actions[end] # below we push Aₜ₊₁
+            # Take action A_t, observe S_{t+1}, R_{t+1}
             new_state, reward, caught_by_monster = step(env, state, action)
             push!(states, new_state.player_pos)
             push!(rewards, reward)
 
             if caught_by_monster
-                T = t + 1
-				log(debug, "Monster at $(state.monster_pos) and player at $(state.player_pos) -> GG.")
+                T = t + 1  # Terminate episode
+                log(debug, "Monster at $(state.monster_pos) and player at $(state.player_pos) -> GG.")
             else
-                # Select and store Aₜ₊₁ ~ π(·|St+1)
-                push!(actions, ε_greedy(Q, new_state.player_pos, ε, ACTIONS))
+                new_action = ε_greedy(Q, new_state.player_pos, ε, ACTIONS)
+                push!(actions, new_action)
             end
 
-            τ = t - n + 1  # τ is the time whose estimate is being updated
+            τ = t - n + 1  # τ is the state-action pair being updated
             if τ ≥ 0
-                # Calculate G: τ to τ+n
+                # Compute G for τ to τ + n
                 G = sum(rewards[Int(τ + i)] * env.γ^(i - 1) for i in 1:min(n, T - τ))
 
                 if τ + n < T
-                    # Add the discounted Q-value of the n-th step
+                    # Add discounted Q-value for the nth step if within bounds
                     G += env.γ^n * Q[states[Int(τ + n + 1)]][actions[Int(τ + n + 1)]]
-                end
+                end  
 
                 # Update Q(Sτ, Aτ)
                 Q[states[Int(τ + 1)]][actions[Int(τ + 1)]] += env.α * (G - Q[states[Int(τ + 1)]][actions[Int(τ + 1)]])
             end
-			
+
+            # Move to the next time step **only if not terminal**
+            if !caught_by_monster
+                state = new_state
+                action = new_action
+            end
+            
             t += 1
         end
 
-        total_reward = sum(rewards)
-        push!(rewards_per_episode, total_reward)
-		
-		log(debug, "Got $total_reward points this episode.")
+        push!(rewards_per_episode, sum(rewards))
+        log(debug, "Got $(sum(rewards)) points this episode.")
     end
 
     return Q, rewards_per_episode
 end
 
-# ╔═╡ 4781fa18-a758-47a9-8ba4-95581fa48a64
-env_sarsa_n2 = initialize_gridworld(N, T, γ, α)
+# ╔═╡ 0674a149-a742-4e30-b1c5-a4f8e86fe818
+# ------------------- Results -----------------------
 
-# ╔═╡ b414710f-5bd5-42ff-bb26-d2848ab27581
-Q_sarsa_n2, rewards_per_episode_sarsa_n2 = n_step_sarsa(env_sarsa_n2, num_episodes, ε, 2, true)
+# ╔═╡ f1a61a78-587b-4f33-850b-a3e917df0344
+begin
+	N = 5
+	T = 30
+	γ = 0.9
+	α = 0.1
+	ε = 0.1
+	num_episodes = 50000
+end;
 
-# ╔═╡ 7af69459-6319-42ce-ba01-0993338cdace
-visualize_values(Q_sarsa_n2, (N, N))
+# ╔═╡ 462988ce-b490-415c-9105-b23a2d6a2de2
+function sarsa(env::GridWorld, num_episodes::Int, ε::Float64)
+	ACTIONS = actions(env)
+	# Q is state -> {action -> value} map:
+	Q = Dict{Tuple{Int, Int}, Dict{Symbol, Float64}}()
 
-# ╔═╡ 7d0d9171-e981-44c1-affb-ddeff67a8409
-# Implementation: n-step SARSA, for n = 4 (page 147)
-
-# ╔═╡ 122cba9a-4f74-44d6-826c-8e542ead314a
-env_sarsa_n4 = initialize_gridworld(N, T, γ, α)
-
-# ╔═╡ 211343d5-f420-4fed-abc3-c62f6f59acfb
-Q_sarsa_n4, rewards_per_episode_sarsa_n4 = n_step_sarsa(env_sarsa_n4, num_episodes, ε, 4, true)
-
-# ╔═╡ f78868be-c9cd-45e2-906a-99c6db39ba96
-visualize_values(Q_sarsa_n4, (N, N))
-
-# ╔═╡ a4f8f9b7-310a-4eff-be26-69a0951d9ed2
-function visualize_policy(Q, grid_size=(5, 5))
-    rows, cols = grid_size
-    grid = fill("", rows, cols)
-
-    # Map actions to arrows for visualization
-    arrows = Dict(:up => "↑", :down => "↓", :left => "←", :right => "→")
-
-    for i in 1:rows
-        for j in 1:cols
-            # Get the action with the highest Q-value for this state
-            best_action = argmax(a -> Q[(i, j)][a], keys(Q[(i, j)]))
-            grid[i, j] = arrows[best_action]
+    # Initialize Q(s, a) arbitrarily
+    for i in 1:N
+        for j in 1:N
+            Q[(i, j)] = Dict(a => 0.0 for a in ACTIONS)
         end
     end
+	
+    rewards_per_episode = []
 
-    # Print the grid
-    println("Policy Visualization:")
-    println("+" * "---+" ^ cols)
-    for i in 1:rows
-        print("|")
-        for j in 1:cols
-            print(" $(grid[i, j]) |")
+    for episode in 1:num_episodes
+        state = initialize_state(env.N)
+        total_reward = 0.0
+
+        action = ε_greedy(Q, state.player_pos, ε, ACTIONS)
+
+        for t in 1:env.T
+            # Take action A, observe R, S'
+            new_state, reward, terminal = step(env, state, action)
+            total_reward += reward
+
+            # Choose A' from S' using ε-greedy policy
+            new_action = ε_greedy(Q, new_state.player_pos, ε, ACTIONS)
+
+            # Update Q-value using SARSA update rule
+            Q[state.player_pos][action] += env.α * (reward + env.γ * Q[new_state.player_pos][new_action] - Q[state.player_pos][action])
+
+            # Update state and action
+            state = new_state
+            action = new_action
+
+            # Break if terminal state (monster caught us) is reached
+            if terminal
+                break
+            end
         end
-        println()
-        println("+" * "---+" ^ cols)
+
+        push!(rewards_per_episode, total_reward)
+    end
+
+    return Q, rewards_per_episode
+end
+
+# ╔═╡ d0204cd6-ae4e-45a8-b0a2-91dc13e2e172
+# SARSA
+
+begin
+	env_sarsa = initialize_gridworld(N, T, γ, α)
+	Q_sarsa, rewards_per_episode_sarsa = sarsa(env_sarsa, num_episodes, ε)
+	print(sum(rewards_per_episode_sarsa))
+end
+
+# ╔═╡ ad9254d8-bb5f-403d-a708-823da295228c
+# Q-Learning
+
+begin
+	env_ql = initialize_gridworld(N, T, γ, α)
+	Q_ql, rewards_per_episode_ql = sarsa(env_ql, num_episodes, ε)
+	print(sum(rewards_per_episode_ql))
+end
+
+# ╔═╡ 1e9675f7-e5aa-4592-8c93-35ab298efabd
+# Double Q-Learning
+
+begin
+	env_dql = initialize_gridworld(N, T, γ, α)
+	Q_dql, rewards_per_episode_dql = sarsa(env_dql, num_episodes, ε)
+	print(sum(rewards_per_episode_dql))
+end
+
+# ╔═╡ 619ff3a9-7757-485e-adec-7c6c7c3f0831
+# SARSA n=1
+
+begin
+	env_sarsa_n1 = initialize_gridworld(N, T, γ, α)
+	Q_sarsa_n1, rewards_per_episode_sarsa_n1 = n_step_sarsa(env_sarsa_n1, num_episodes, ε, 1)
+	print(sum(rewards_per_episode_sarsa_n1))
+end
+
+# ╔═╡ daab195a-6793-4fb4-8b85-5d3c05946d39
+# SARSA n = 2, 4, 6, ..., 30
+
+begin
+    results = Dict()
+
+    for n in 2:2:30
+        env = initialize_gridworld(N, T, γ, α)
+        Q, rewards_per_episode = n_step_sarsa(env, num_episodes, ε, n)
+        total_reward = sum(rewards_per_episode)
+
+        println("n = $n -> Total Reward: $total_reward")
+        results[n] = (Q, total_reward)
     end
 end
 
-# ╔═╡ a4bcff37-c567-4310-8d3f-7f6785492d33
-# visualize_policy(Q_sarsa, (N, N))
-
-# ╔═╡ 6bf7ec71-06fc-411e-8fa2-1856a46057e5
-# visualize_policy(Q_sarsa_n4, (N, N))
-
-# ╔═╡ 5e8ea938-2a7d-421c-b298-6f95817ea41f
-print(sum(rewards_per_episode_sarsa_n2))
-
-# ╔═╡ 4db83b79-39f8-4867-9ed7-809f61359cc3
-print(sum(rewards_per_episode_sarsa_n4))
-
-# ╔═╡ 017c6354-adde-489e-a175-0dd425def0ac
-print(sum(rewards_per_episode_sarsa))
-
-# ╔═╡ 0555f33a-af79-4f12-9cf7-74b60544347d
-print(sum(rewards_per_episode_dql))
-
-# ╔═╡ cb71da98-f5d8-4621-91c1-b3ca4577e441
-print(sum(rewards_per_episode_ql))
-
-# ╔═╡ 66dd342b-15a7-46f5-8c92-82db5c2b6cf5
-# TODO: n-step sarsa - what is going on, debug it 
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1693,7 +1654,9 @@ version = "1.4.1+2"
 # ╠═35b6aa17-3d37-4e42-8594-759f181d1bfe
 # ╠═7667ecaa-34ca-4e08-b290-110561fd1c8c
 # ╠═6635308e-4202-424e-890b-807d40a391ea
+# ╠═ae62b0ba-ce37-40d6-9afb-8d00bbe92db0
 # ╠═279fed15-f321-47d9-9cb3-7195571d084d
+# ╠═a4f8f9b7-310a-4eff-be26-69a0951d9ed2
 # ╠═d050ddc3-ae28-4a2e-a006-e12381c9bfdd
 # ╠═2ac49d21-013a-4190-842e-ac2312df66eb
 # ╠═45369aa5-2f0c-4787-9492-c9f1e19ace7d
@@ -1706,47 +1669,20 @@ version = "1.4.1+2"
 # ╠═c362401b-cb06-4119-8094-af7a3cf30628
 # ╠═6a20ba58-fac4-406a-b68a-ba658d2dc60e
 # ╠═88685918-bc20-49c9-bd4d-4fe5e7f5f0c3
-# ╠═11337d2b-c1d6-465b-8b5f-31204a22a07e
-# ╠═cad3c032-7623-46ac-ad1c-0742d8dc914e
-# ╠═f1a61a78-587b-4f33-850b-a3e917df0344
-# ╠═07695400-a456-4c3f-b2f2-573fb5c1a817
-# ╠═c2a07cee-e83e-44f1-b6d9-1865a11de913
-# ╠═6b78b6d4-8e33-41ac-aa01-a2f30d946c2b
-# ╠═e5668bc3-eeca-4354-88aa-3c39b66ec2d4
 # ╠═b9ec071d-b40a-4fad-8c34-72fa3877bca2
-# ╠═ae62b0ba-ce37-40d6-9afb-8d00bbe92db0
 # ╠═462988ce-b490-415c-9105-b23a2d6a2de2
-# ╠═8011f631-a210-4ddb-8b34-a9f495a85e81
-# ╠═dbae9769-94a7-4303-a541-973037f1be18
-# ╠═6713c22c-bdf7-41ac-82a9-21ab75be6c93
-# ╠═2c81a0b2-c56a-4a0b-84e9-28a25326e5b3
 # ╠═c3015524-5b2c-4919-9d0b-1fd1c5bc478e
 # ╠═e899d5f3-093e-4970-93be-9882c1e4d2a5
-# ╠═0f9f4f35-0cf8-4f80-9054-9d03259f81b6
-# ╠═a1d63f5b-c751-4004-9cad-dbd16bfc1257
-# ╠═e6bb8f04-e940-40bb-97ea-3633dbae937e
 # ╠═3c9b873c-b895-43af-8244-48bb66f2aaf0
 # ╠═d1c48868-683b-40ab-8541-5fdbb3607101
-# ╠═c45e66a3-aa03-4868-bc9a-47a9e6172eca
-# ╠═74b2332d-43bb-487a-9401-bc366aa9451f
-# ╠═9582e4b3-f1cf-4a62-b2d1-8384a6ed2a1b
 # ╠═81cade4e-0e5c-4b57-9265-8d5f8b6df1a5
 # ╠═0c39847b-5d22-4131-bf59-0afb980ad0ee
-# ╠═4781fa18-a758-47a9-8ba4-95581fa48a64
-# ╠═b414710f-5bd5-42ff-bb26-d2848ab27581
-# ╠═7af69459-6319-42ce-ba01-0993338cdace
-# ╠═7d0d9171-e981-44c1-affb-ddeff67a8409
-# ╠═122cba9a-4f74-44d6-826c-8e542ead314a
-# ╠═211343d5-f420-4fed-abc3-c62f6f59acfb
-# ╠═f78868be-c9cd-45e2-906a-99c6db39ba96
-# ╠═a4f8f9b7-310a-4eff-be26-69a0951d9ed2
-# ╠═a4bcff37-c567-4310-8d3f-7f6785492d33
-# ╠═6bf7ec71-06fc-411e-8fa2-1856a46057e5
-# ╠═5e8ea938-2a7d-421c-b298-6f95817ea41f
-# ╠═4db83b79-39f8-4867-9ed7-809f61359cc3
-# ╠═017c6354-adde-489e-a175-0dd425def0ac
-# ╠═0555f33a-af79-4f12-9cf7-74b60544347d
-# ╠═cb71da98-f5d8-4621-91c1-b3ca4577e441
-# ╠═66dd342b-15a7-46f5-8c92-82db5c2b6cf5
+# ╠═0674a149-a742-4e30-b1c5-a4f8e86fe818
+# ╠═f1a61a78-587b-4f33-850b-a3e917df0344
+# ╠═d0204cd6-ae4e-45a8-b0a2-91dc13e2e172
+# ╠═ad9254d8-bb5f-403d-a708-823da295228c
+# ╠═1e9675f7-e5aa-4592-8c93-35ab298efabd
+# ╠═619ff3a9-7757-485e-adec-7c6c7c3f0831
+# ╠═daab195a-6793-4fb4-8b85-5d3c05946d39
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
