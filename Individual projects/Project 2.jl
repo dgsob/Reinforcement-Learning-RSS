@@ -17,22 +17,32 @@ using Plots
 # ----------- Preparation and helper functions ------
 
 # ╔═╡ ae62b0ba-ce37-40d6-9afb-8d00bbe92db0
-# ε-greedy policy for action selection
 function ε_greedy(Q, state, ε, actions)
     if rand() < ε
         return rand(actions)  # exploration
     else
-        return argmax(a -> Q[state][a], actions) # exploitation
+        q_values = Q[state]
+        
+        if all(q_values[a] == q_values[actions[1]] for a in actions)
+            return rand(actions)  # exploration if all Q-values are equal
+        else
+            return argmax(a -> q_values[a], actions)  # exploitation
+        end
     end
 end
 
 # ╔═╡ 7a15792c-e44f-4e59-bde9-6b373e7f5a85
 function ε_greedy_double(Q1, Q2, state, ε, ACTIONS)
     if rand() < ε
-        return rand(ACTIONS)  # Random action (exploration)
+        return rand(ACTIONS)  # exploration
     else
-        # Greedy action (exploitation) based on Q1 + Q2
-        return argmax(a -> Q1[state][a] + Q2[state][a], ACTIONS)
+        combined_q_values = [Q1[state][a] + Q2[state][a] for a in ACTIONS]
+        
+        if all(combined_q_values .== combined_q_values[1])
+            return rand(ACTIONS)  # exploration if all combined Q-values are equal
+        else
+            return argmax(a -> Q1[state][a] + Q2[state][a], ACTIONS)  # exploitation
+        end
     end
 end
 
@@ -423,11 +433,7 @@ function n_step_sarsa(env::GridWorld, num_episodes::Int, ε::Float64, n::Int, de
         T = env.T  # Max episode length
         t = 0
 
-        log(debug, "----------------------------------", 
-            "Episode $episode:", 
-            "Monster at $(state.monster_pos).", 
-            "Player at $(state.player_pos).", 
-            "Apple at $(state.apple_pos).")
+        log(debug, "----------------------------------", "Episode $episode:")
 		
         while t < T
             # Take action A_t, observe S_{t+1}, R_{t+1}
@@ -435,9 +441,11 @@ function n_step_sarsa(env::GridWorld, num_episodes::Int, ε::Float64, n::Int, de
             push!(states, new_state.player_pos)
             push!(rewards, reward)
 
+			log(debug, "Player at $(new_state.player_pos).")
+
             if caught_by_monster
                 T = t + 1  # Terminate episode
-                log(debug, "Monster at $(state.monster_pos) and player at $(state.player_pos) -> GG.")
+                log(debug, "Monster at $(new_state.monster_pos) and player at $(new_state.player_pos) -> GG.")
             else
                 new_action = ε_greedy(Q, new_state.player_pos, ε, ACTIONS)
                 push!(actions, new_action)
@@ -483,8 +491,8 @@ begin
 	γ = 0.9
 	α = 0.1
 	ε = 0.1
-	num_episodes = 3300
-	num_trainings = 3000
+	num_episodes = 515
+	num_trainings = 500
 end;
 
 # ╔═╡ 462988ce-b490-415c-9105-b23a2d6a2de2
@@ -597,6 +605,8 @@ end
 
 
 # ╔═╡ c1b97179-6e08-451b-b0a8-4ad69268e5e6
+# Random agent
+
 begin
 	env_rand = initialize_gridworld(N, T, γ, α)
 	rewards_per_episode_rand = random_agent(env_rand, num_episodes)
@@ -604,6 +614,20 @@ begin
 	println(total_reward_rand)
 	println(total_reward_rand/num_episodes)
 end
+
+# ╔═╡ ec5d3113-1f53-40b6-9767-287a38ce515b
+# SARSA n=4
+
+begin
+	env_sarsa_n4 = initialize_gridworld(N, T, γ, α)
+	Q_sarsa_n4, rewards_per_episode_sarsa_n4 = n_step_sarsa(env_sarsa_n4, num_episodes, ε, 4, true)
+	total_reward_n4 = sum(rewards_per_episode_sarsa_n4)
+	println(total_reward_n4)
+	println(total_reward_n4/num_episodes)
+end
+
+# ╔═╡ 2c45d478-6a9e-4a9b-8238-a87fc8c5be45
+visualize_values(Q_sarsa_n4)
 
 # ╔═╡ f1861bca-4efb-490f-89b6-c88a6c1bec57
 # ----------- Learning curves ---------------
@@ -659,8 +683,9 @@ end;
 
 # ╔═╡ b3633c5b-95b7-48b8-9000-d48e31f08379
 begin
-	bin = 250
-	cutoff::Int = num_episodes - 800
+	bin = 100
+	cutoff::Int = num_episodes - 15
+	x_pos = 150 
 
 	rewards_sarsa_avg = rolling_average(rewards_sarsa, bin)
 	rewards_ql_avg = rolling_average(rewards_ql, bin)
@@ -678,7 +703,6 @@ begin
 
 	lw = 1.3
 	colors = [:blue, :red, :green, :blueviolet, :orange, :chocolate]
-	x_pos = 1500 
     offset = 0.003
 	
 	plt = plot(rewards_sarsa_avg_cut, label="", xlabel="Episode", ylabel="Total reward (moving average over $bin episodes)", title="Learning curves (average over $num_trainings training runs)", grid=true, linewidth=lw, linecolor=colors[1], size=(800, 600), dpi=500)
@@ -696,7 +720,7 @@ begin
     annotate!(x_pos, rewards_sarsa_n4_avg_cut[x_pos] + offset, text("4-step SARSA", :bottom, 10, colors[5]))
     annotate!(x_pos, rewards_rand_avg_cut[x_pos] + offset, text("Random actions", :bottom, 10, colors[6]))
 
-	# savefig(plt, "learning_curves_$bin.png")
+	# savefig(plt, "learning_curves_$bin_bin_$num_trainings_trainings.png")
 	plot(plt)
 end
 
@@ -1854,6 +1878,8 @@ version = "1.4.1+2"
 # ╠═619ff3a9-7757-485e-adec-7c6c7c3f0831
 # ╠═daab195a-6793-4fb4-8b85-5d3c05946d39
 # ╠═c1b97179-6e08-451b-b0a8-4ad69268e5e6
+# ╠═ec5d3113-1f53-40b6-9767-287a38ce515b
+# ╠═2c45d478-6a9e-4a9b-8238-a87fc8c5be45
 # ╠═f1861bca-4efb-490f-89b6-c88a6c1bec57
 # ╠═a4340751-c6d3-4a44-9066-a954f729d981
 # ╠═b3633c5b-95b7-48b8-9000-d48e31f08379
