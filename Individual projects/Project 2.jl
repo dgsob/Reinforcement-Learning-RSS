@@ -26,6 +26,16 @@ function ε_greedy(Q, state, ε, actions)
     end
 end
 
+# ╔═╡ 7a15792c-e44f-4e59-bde9-6b373e7f5a85
+function ε_greedy_double(Q1, Q2, state, ε, ACTIONS)
+    if rand() < ε
+        return rand(ACTIONS)  # Random action (exploration)
+    else
+        # Greedy action (exploitation) based on Q1 + Q2
+        return argmax(a -> Q1[state][a] + Q2[state][a], ACTIONS)
+    end
+end
+
 # ╔═╡ 279fed15-f321-47d9-9cb3-7195571d084d
 function visualize_values(Q, grid_size=(5, 5))
     rows, cols = grid_size
@@ -106,6 +116,17 @@ function log(debug_mode, messages...)
 		end
 	end
 end;
+
+# ╔═╡ c6042e18-ded0-4685-8279-1afc2aba3a86
+function mean(collection)
+	return sum(collection)/length(collection)
+end
+
+# ╔═╡ 5307435a-97af-4ffa-9201-17863a241735
+function rolling_average(data::Vector{Float64}, window_size::Int)
+	return [mean(data[i:min(i+window_size-1, length(data))]) for i in 1:length(data)]
+	# return [mean(data[i:min(i+bin-1, length(data))]) for i in 1:bin:length(data)]
+end
 
 # ╔═╡ 2ac49d21-013a-4190-842e-ac2312df66eb
 # ------------- Environment Set Up ------------------
@@ -224,6 +245,36 @@ function step(env::GridWorld, state::State, action::Symbol)
     
     new_state = State(player_pos, monster_pos, new_apple_pos)
     return new_state, reward, terminal
+end
+
+# ╔═╡ 70a94cf3-63aa-4a5f-ae58-17698267ed16
+# ---- Implementation: Random policy for testing ----
+
+# ╔═╡ 3e68f09b-61e0-430a-aff5-85aff6aa9b01
+function random_agent(env, num_episodes)
+	ACTIONS = actions(env)
+	rewards_per_episode = []
+	
+	for episode in 1:num_episodes
+		state = initialize_state(env.N)
+		total_reward = 0.0
+		
+		for t in 1:env.T
+		    action = rand(ACTIONS)
+		    new_state, reward, terminal = step(env, state, action)
+			total_reward += reward
+			
+		    state = new_state
+		    
+			if terminal
+		        break
+		    end
+		end
+
+		push!(rewards_per_episode, total_reward) 
+	end
+
+	return rewards_per_episode
 end
 
 # ╔═╡ b9ec071d-b40a-4fad-8c34-72fa3877bca2
@@ -432,7 +483,8 @@ begin
 	γ = 0.9
 	α = 0.1
 	ε = 0.1
-	num_episodes = 50000
+	num_episodes = 3300
+	num_trainings = 3000
 end;
 
 # ╔═╡ 462988ce-b490-415c-9105-b23a2d6a2de2
@@ -489,7 +541,9 @@ end
 begin
 	env_sarsa = initialize_gridworld(N, T, γ, α)
 	Q_sarsa, rewards_per_episode_sarsa = sarsa(env_sarsa, num_episodes, ε)
-	print(sum(rewards_per_episode_sarsa))
+	total_reward_sarsa = sum(rewards_per_episode_sarsa)
+	println(total_reward_sarsa)
+	println(total_reward_sarsa/num_episodes)
 end
 
 # ╔═╡ ad9254d8-bb5f-403d-a708-823da295228c
@@ -497,8 +551,10 @@ end
 
 begin
 	env_ql = initialize_gridworld(N, T, γ, α)
-	Q_ql, rewards_per_episode_ql = sarsa(env_ql, num_episodes, ε)
-	print(sum(rewards_per_episode_ql))
+	Q_ql, rewards_per_episode_ql = q_learning(env_ql, num_episodes, ε)
+	total_reward_ql = sum(rewards_per_episode_ql)
+	println(total_reward_ql)
+	println(total_reward_ql/num_episodes)
 end
 
 # ╔═╡ 1e9675f7-e5aa-4592-8c93-35ab298efabd
@@ -506,8 +562,10 @@ end
 
 begin
 	env_dql = initialize_gridworld(N, T, γ, α)
-	Q_dql, rewards_per_episode_dql = sarsa(env_dql, num_episodes, ε)
-	print(sum(rewards_per_episode_dql))
+	Q_dql, rewards_per_episode_dql = double_q_learning(env_dql, num_episodes, ε)
+	total_reward_dql = sum(rewards_per_episode_dql)
+	println(total_reward_dql)
+	println(total_reward_dql/num_episodes)
 end
 
 # ╔═╡ 619ff3a9-7757-485e-adec-7c6c7c3f0831
@@ -516,25 +574,131 @@ end
 begin
 	env_sarsa_n1 = initialize_gridworld(N, T, γ, α)
 	Q_sarsa_n1, rewards_per_episode_sarsa_n1 = n_step_sarsa(env_sarsa_n1, num_episodes, ε, 1)
-	print(sum(rewards_per_episode_sarsa_n1))
+	total_reward_n1 = sum(rewards_per_episode_sarsa_n1)
+	println(total_reward_n1)
+	println(total_reward_n1/num_episodes)
 end
 
 # ╔═╡ daab195a-6793-4fb4-8b85-5d3c05946d39
 # SARSA n = 2, 4, 6, ..., 30
 
 begin
-    results = Dict()
+    # results = Dict()
 
     for n in 2:2:30
         env = initialize_gridworld(N, T, γ, α)
         Q, rewards_per_episode = n_step_sarsa(env, num_episodes, ε, n)
         total_reward = sum(rewards_per_episode)
 
-        println("n = $n -> Total Reward: $total_reward")
-        results[n] = (Q, total_reward)
+        println("n = $n -> Total Reward: $total_reward. Average: $(total_reward/num_episodes).")
+        # results[n] = (Q, total_reward)
     end
 end
 
+
+# ╔═╡ c1b97179-6e08-451b-b0a8-4ad69268e5e6
+begin
+	env_rand = initialize_gridworld(N, T, γ, α)
+	rewards_per_episode_rand = random_agent(env_rand, num_episodes)
+	total_reward_rand = sum(rewards_per_episode_rand)
+	println(total_reward_rand)
+	println(total_reward_rand/num_episodes)
+end
+
+# ╔═╡ f1861bca-4efb-490f-89b6-c88a6c1bec57
+# ----------- Learning curves ---------------
+
+# ╔═╡ a4340751-c6d3-4a44-9066-a954f729d981
+begin
+	rewards_sarsa = zeros(num_episodes)
+	rewards_ql = zeros(num_episodes)
+	rewards_dql = zeros(num_episodes)
+	rewards_sarsa_n2 = zeros(num_episodes)
+	rewards_sarsa_n4 = zeros(num_episodes)
+	rewards_rand = zeros(num_episodes)
+
+	for training in 1:num_trainings
+		# SARSA
+		env_sarsa = initialize_gridworld(N, T, γ, α)
+		_, rewards_per_episode_sarsa = sarsa(env_sarsa, num_episodes, ε)
+		rewards_sarsa .+= rewards_per_episode_sarsa
+	
+		# Q-Learning
+		env_ql = initialize_gridworld(N, T, γ, α)
+		_, rewards_per_episode_ql = q_learning(env_ql, num_episodes, ε)
+		rewards_ql .+= rewards_per_episode_ql
+	
+		# Double Q-Learning
+		env_dql = initialize_gridworld(N, T, γ, α)
+		_, rewards_per_episode_dql = double_q_learning(env_dql, num_episodes, ε)
+		rewards_dql .+= rewards_per_episode_dql
+	
+		# SARSA n=2
+		env_sarsa_n2 = initialize_gridworld(N, T, γ, α)
+		_, rewards_per_episode_sarsa_n2 = n_step_sarsa(env_sarsa_n2, num_episodes, ε, 2)
+		rewards_sarsa_n2 .+= rewards_per_episode_sarsa_n2
+	
+		# SARSA n=4
+		env_sarsa_n4 = initialize_gridworld(N, T, γ, α)
+		_, rewards_per_episode_sarsa_n4 = n_step_sarsa(env_sarsa_n4, num_episodes, ε, 4)
+		rewards_sarsa_n4 .+= rewards_per_episode_sarsa_n4
+	
+		# Random Agent
+		env_rand = initialize_gridworld(N, T, γ, α)
+		rewards_per_episode_rand = random_agent(env_rand, num_episodes)
+		rewards_rand .+= rewards_per_episode_rand
+	end
+	
+	rewards_sarsa ./= num_trainings
+	rewards_ql ./= num_trainings
+	rewards_dql ./= num_trainings
+	rewards_sarsa_n2 ./= num_trainings
+	rewards_sarsa_n4 ./= num_trainings
+	rewards_rand ./= num_trainings
+end;
+
+# ╔═╡ b3633c5b-95b7-48b8-9000-d48e31f08379
+begin
+	bin = 250
+	cutoff::Int = num_episodes - 800
+
+	rewards_sarsa_avg = rolling_average(rewards_sarsa, bin)
+	rewards_ql_avg = rolling_average(rewards_ql, bin)
+	rewards_dql_avg = rolling_average(rewards_dql, bin)
+	rewards_sarsa_n2_avg = rolling_average(rewards_sarsa_n2, bin)
+	rewards_sarsa_n4_avg = rolling_average(rewards_sarsa_n4, bin)
+	rewards_rand_avg = rolling_average(rewards_rand, bin)
+
+	rewards_sarsa_avg_cut = rewards_sarsa_avg[1:cutoff]
+	rewards_ql_avg_cut = rewards_ql_avg[1:cutoff]
+	rewards_dql_avg_cut = rewards_dql_avg[1:cutoff]
+	rewards_sarsa_n2_avg_cut = rewards_sarsa_n2_avg[1:cutoff]
+	rewards_sarsa_n4_avg_cut = rewards_sarsa_n4_avg[1:cutoff]
+	rewards_rand_avg_cut = rewards_rand_avg[1:cutoff]
+
+	lw = 1.3
+	colors = [:blue, :red, :green, :blueviolet, :orange, :chocolate]
+	x_pos = 1500 
+    offset = 0.003
+	
+	plt = plot(rewards_sarsa_avg_cut, label="", xlabel="Episode", ylabel="Total reward (moving average over $bin episodes)", title="Learning curves (average over $num_trainings training runs)", grid=true, linewidth=lw, linecolor=colors[1], size=(800, 600), dpi=500)
+	
+	plot!(rewards_ql_avg_cut, label="", linewidth=lw, linecolor=colors[2])
+	plot!(rewards_dql_avg_cut, label="", linewidth=lw, linecolor=colors[3])
+	plot!(rewards_sarsa_n2_avg_cut, label="", linewidth=lw, linecolor=colors[4])
+	plot!(rewards_sarsa_n4_avg_cut, label="", linewidth=lw, linecolor=colors[5])
+	plot!(rewards_rand_avg_cut, label="", linewidth=lw, linecolor=colors[6])
+
+    annotate!(x_pos, rewards_sarsa_avg_cut[x_pos] - 0.5*offset, text("SARSA", :top, 10, colors[1]))
+    annotate!(x_pos, rewards_ql_avg_cut[x_pos] + offset, text("Q-Learning", :bottom, 10, colors[2]))
+    annotate!(x_pos, rewards_dql_avg_cut[x_pos] + offset, text("Double Q-Learning", :bottom, 10, colors[3])) 
+    annotate!(x_pos, rewards_sarsa_n2_avg_cut[x_pos] + offset, text("2-step SARSA", :bottom, 10, colors[4]))
+    annotate!(x_pos, rewards_sarsa_n4_avg_cut[x_pos] + offset, text("4-step SARSA", :bottom, 10, colors[5]))
+    annotate!(x_pos, rewards_rand_avg_cut[x_pos] + offset, text("Random actions", :bottom, 10, colors[6]))
+
+	# savefig(plt, "learning_curves_$bin.png")
+	plot(plt)
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1655,9 +1819,12 @@ version = "1.4.1+2"
 # ╠═7667ecaa-34ca-4e08-b290-110561fd1c8c
 # ╠═6635308e-4202-424e-890b-807d40a391ea
 # ╠═ae62b0ba-ce37-40d6-9afb-8d00bbe92db0
+# ╠═7a15792c-e44f-4e59-bde9-6b373e7f5a85
 # ╠═279fed15-f321-47d9-9cb3-7195571d084d
 # ╠═a4f8f9b7-310a-4eff-be26-69a0951d9ed2
 # ╠═d050ddc3-ae28-4a2e-a006-e12381c9bfdd
+# ╠═c6042e18-ded0-4685-8279-1afc2aba3a86
+# ╠═5307435a-97af-4ffa-9201-17863a241735
 # ╠═2ac49d21-013a-4190-842e-ac2312df66eb
 # ╠═45369aa5-2f0c-4787-9492-c9f1e19ace7d
 # ╠═8fd48449-cf2f-45aa-b4a4-23f121ce16e3
@@ -1669,6 +1836,8 @@ version = "1.4.1+2"
 # ╠═c362401b-cb06-4119-8094-af7a3cf30628
 # ╠═6a20ba58-fac4-406a-b68a-ba658d2dc60e
 # ╠═88685918-bc20-49c9-bd4d-4fe5e7f5f0c3
+# ╠═70a94cf3-63aa-4a5f-ae58-17698267ed16
+# ╠═3e68f09b-61e0-430a-aff5-85aff6aa9b01
 # ╠═b9ec071d-b40a-4fad-8c34-72fa3877bca2
 # ╠═462988ce-b490-415c-9105-b23a2d6a2de2
 # ╠═c3015524-5b2c-4919-9d0b-1fd1c5bc478e
@@ -1684,5 +1853,9 @@ version = "1.4.1+2"
 # ╠═1e9675f7-e5aa-4592-8c93-35ab298efabd
 # ╠═619ff3a9-7757-485e-adec-7c6c7c3f0831
 # ╠═daab195a-6793-4fb4-8b85-5d3c05946d39
+# ╠═c1b97179-6e08-451b-b0a8-4ad69268e5e6
+# ╠═f1861bca-4efb-490f-89b6-c88a6c1bec57
+# ╠═a4340751-c6d3-4a44-9066-a954f729d981
+# ╠═b3633c5b-95b7-48b8-9000-d48e31f08379
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
