@@ -151,9 +151,21 @@ function softmax_policy(state::State, action::Symbol, θ::Vector{Float64}, N::In
     actions = get_actions(state)
     features = [feature_vector(state, a, N) for a in actions]
     h = [dot(θ, f) for f in features]
-    exp_h = exp.(h)
+    exp_h = exp.(h .- maximum(h))
     prob = exp_h ./ sum(exp_h)
     return prob[findfirst(isequal(action), actions)]
+end;
+
+# ╔═╡ c2932d76-4922-4fb4-9b63-987ad16e176b
+function compute_∇(θ, state, action, env)
+	actions = get_actions(state)
+	features = [feature_vector(state, a, env.N) for a in actions]
+	h = [dot(θ, f) for f in features]
+	exp_h = exp.(h)
+	prob = exp_h ./ sum(exp_h)
+	
+	grad_log_policy = feature_vector(state, action, env.N) - sum(prob .* features)
+	return grad_log_policy
 end;
 
 # ╔═╡ 70a94cf3-63aa-4a5f-ae58-17698267ed16
@@ -207,16 +219,9 @@ function reinforce(env::GridWorld, num_episodes::Int, γ::Float64, α::Float64)
             state = episode_states[t]
             action = episode_actions[t]
             
-            # Compute the gradient of the log-policy
-            features = [feature_vector(state, a, env.N) for a in actions]
-            h = [dot(θ, f) for f in features]
-            exp_h = exp.(h)
-            prob = exp_h ./ sum(exp_h)
+            grad_log_policy = compute_∇(θ, state, action, env)
             
-            grad_log_policy = feature_vector(state, action, env.N) - sum(prob .* features)
-            
-            # Update θ
-            θ += α * (γ^t) * G * grad_log_policy
+            θ += α * (γ^t) * G * grad_log_policy # update 
         end
     end
     
@@ -264,7 +269,7 @@ begin
 	T = 200
 	γ = 0.95
 	α = 0.01 # 0.01 -> try other later
-	num_episodes = 1000
+	num_episodes = 1100
 	num_trainings = 1
 end;
 
@@ -334,7 +339,7 @@ function plot_learning_curves(
 end
 
 # ╔═╡ 8fce2c47-dc6e-4627-892e-4cf611b3982a
-plot_learning_curves([rewards_REINFORCE], num_trainings, bin=50, slice_last=20, x_pos=1, labels_list=["REINFORCE"])
+plot_learning_curves([rewards_REINFORCE], num_trainings, bin=50, slice_last=100, x_pos=1, labels_list=["REINFORCE"])
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1468,6 +1473,7 @@ version = "1.4.1+2"
 # ╠═918ba363-98ce-477d-8599-2388f4e6b852
 # ╠═3ed4e3f4-aba4-478c-b357-a5ed83605a14
 # ╠═2396a641-87b0-4cd4-9440-b6fd4855b126
+# ╠═c2932d76-4922-4fb4-9b63-987ad16e176b
 # ╠═70a94cf3-63aa-4a5f-ae58-17698267ed16
 # ╠═b9ec071d-b40a-4fad-8c34-72fa3877bca2
 # ╠═c3015524-5b2c-4919-9d0b-1fd1c5bc478e
