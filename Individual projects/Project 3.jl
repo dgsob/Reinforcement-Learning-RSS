@@ -4,37 +4,22 @@
 using Markdown
 using InteractiveUtils
 
-# ╔═╡ 35b6aa17-3d37-4e42-8594-759f181d1bfe
-# ---------------- Preparation ----------------------
+# ╔═╡ 731e72df-11cd-47f4-bd31-665ef7ad2b1e
+using LinearAlgebra
 
-# ╔═╡ d050ddc3-ae28-4a2e-a006-e12381c9bfdd
-function log(debug_mode, messages...)
-	if debug_mode
-		for message in messages
-			println(message)
-		end
-	end
-end;
+# ╔═╡ 5c8c8e1e-fb4a-478d-a342-f78a9fac7486
+using Plots
 
-# ╔═╡ c6042e18-ded0-4685-8279-1afc2aba3a86
-function average(collection)
-	return sum(collection)/length(collection)
-end;
-
-# ╔═╡ 5307435a-97af-4ffa-9201-17863a241735
-function rolling_average(data::Vector{Float64}, window_size::Int)
-	return [mean(data[i:min(i+window_size-1, length(data))]) for i in 1:length(data)]
-end;
+# ╔═╡ 6e1e52fc-b04e-4976-83c6-47cbeb877f53
+# ------------------ Imports ------------------------
 
 # ╔═╡ 2ac49d21-013a-4190-842e-ac2312df66eb
-# ------------- Environment Set Up ------------------
+# ------------- Environment Set-up ------------------
 
 # ╔═╡ 45369aa5-2f0c-4787-9492-c9f1e19ace7d
 struct GridWorld
     N::Int  # Grid size (N x N)
     T::Int  # Episode length
-    γ::Float64  # Discount factor
-    α::Float64  # Learning rate
 end
 
 # ╔═╡ 8fd48449-cf2f-45aa-b4a4-23f121ce16e3
@@ -45,13 +30,18 @@ struct State
 end
 
 # ╔═╡ a167e758-e560-4d27-8ccb-36d9d1cac015
-function actions(env::GridWorld)
+function get_actions(env::GridWorld)
+	return [:left, :up, :right, :down] # whole action space
+end;
+
+# ╔═╡ 39937079-e0a4-4bef-99b5-ff602604bbcb
+function get_actions(state::State)
 	return [:left, :up, :right, :down] # the same for every state
 end;
 
 # ╔═╡ 267184ab-f306-4ded-b1bb-72a25f82a527
-function initialize_gridworld(N, T, γ, α)
-    return GridWorld(N, T, γ, α)
+function initialize_gridworld(N, T)
+    return GridWorld(N, T)
 end;
 
 # ╔═╡ b59a2e38-c98f-48ff-9319-41e7cfecfa0b
@@ -90,7 +80,6 @@ function move_player(player_pos, action, N)
         error("Invalid action")
     end
     
-    # If the new position is outside the grid, stay in place
     return is_within_grid(new_pos, N) ? new_pos : player_pos
 end;
 
@@ -100,7 +89,6 @@ function move_monster(monster_pos, N)
     move = rand(possible_moves)
     new_pos = (monster_pos[1] + move[1], monster_pos[2] + move[2])
     
-    # If the new position is outside the grid, stay in place
     return is_within_grid(new_pos, N) ? new_pos : monster_pos
 end;
 
@@ -134,6 +122,40 @@ function step(env::GridWorld, state::State, action::Symbol)
     return new_state, reward, terminal
 end;
 
+# ╔═╡ 918ba363-98ce-477d-8599-2388f4e6b852
+# --------------- Training Set-up -------------------
+
+# ╔═╡ 2396a641-87b0-4cd4-9440-b6fd4855b126
+function feature_vector(state::State, action::Symbol, N::Int)
+    Δx_apple = state.apple_pos[1] - state.player_pos[1]
+    Δy_apple = state.apple_pos[2] - state.player_pos[2]
+    Δx_monster = state.monster_pos[1] - state.player_pos[1]
+    Δy_monster = state.monster_pos[2] - state.player_pos[2]
+    
+    action_vec = zeros(4)
+    if action == :left
+        action_vec[1] = 1
+    elseif action == :up
+        action_vec[2] = 1
+    elseif action == :right
+        action_vec[3] = 1
+    elseif action == :down
+        action_vec[4] = 1
+    end
+    
+    return vcat(Δx_apple, Δy_apple, Δx_monster, Δy_monster, action_vec)
+end;
+
+# ╔═╡ 3ed4e3f4-aba4-478c-b357-a5ed83605a14
+function softmax_policy(state::State, action::Symbol, θ::Vector{Float64}, N::Int)
+    actions = get_actions(state)
+    features = [feature_vector(state, a, N) for a in actions]
+    h = [dot(θ, f) for f in features]
+    exp_h = exp.(h)
+    prob = exp_h ./ sum(exp_h)
+    return prob[findfirst(isequal(action), actions)]
+end;
+
 # ╔═╡ 70a94cf3-63aa-4a5f-ae58-17698267ed16
 # --------------- Implementation --------------------
 # ------ Semi-gradient n-step SARSA (page 247) ------
@@ -141,6 +163,65 @@ end;
 # ╔═╡ b9ec071d-b40a-4fad-8c34-72fa3877bca2
 # --------------- Implementation --------------------
 # ------------ REINFORCE (page 328) -----------------
+
+function reinforce(env::GridWorld, num_episodes::Int, γ::Float64, α::Float64)
+	actions = get_actions(env)
+    θ = zeros(length(feature_vector(initialize_state(env.N), :left, env.N)))
+	total_rewards = Float64[]
+    
+    for episode in 1:num_episodes
+        state = initialize_state(env.N)
+        episode_states = []
+        episode_actions = []
+        episode_rewards = []
+
+		# Generate episode
+        for t in 0:env.T-1
+            # Choose action based on current policy
+            probs = [softmax_policy(state, a, θ, env.N) for a in actions]
+			cumulative_probs = cumsum(probs)
+			action = actions[findfirst(rand() .≤ cumulative_probs)]
+            
+            # Take action and observe next state and reward
+            next_state, reward, terminal = step(env, state, action)
+            
+            # Store the state, action, and reward
+            push!(episode_states, state)
+            push!(episode_actions, action)
+            push!(episode_rewards, reward)
+            
+            if terminal
+                break
+            end
+            
+            state = next_state
+        end
+
+		total_reward = sum(episode_rewards)
+        push!(total_rewards, total_reward)
+        
+        # Calculate returns and update θ
+        G = 0.0
+        for t in length(episode_states):-1:1 # reverse episode_states
+            G = γ * G + episode_rewards[t]
+            state = episode_states[t]
+            action = episode_actions[t]
+            
+            # Compute the gradient of the log-policy
+            features = [feature_vector(state, a, env.N) for a in actions]
+            h = [dot(θ, f) for f in features]
+            exp_h = exp.(h)
+            prob = exp_h ./ sum(exp_h)
+            
+            grad_log_policy = feature_vector(state, action, env.N) - sum(prob .* features)
+            
+            # Update θ
+            θ += α * (γ^t) * G * grad_log_policy
+        end
+    end
+    
+    return θ, total_rewards
+end;
 
 # ╔═╡ c3015524-5b2c-4919-9d0b-1fd1c5bc478e
 # --------------- Implementation --------------------
@@ -150,9 +231,115 @@ end;
 # --------------- Implementation --------------------
 # ------- One step actor critic (page 332) ----------
 
+# ╔═╡ 35b6aa17-3d37-4e42-8594-759f181d1bfe
+# ------------- Auxiliary functions -----------------
+
+# ╔═╡ d050ddc3-ae28-4a2e-a006-e12381c9bfdd
+function log(debug_mode, messages...)
+	if debug_mode
+		for message in messages
+			println(message)
+		end
+	end
+end;
+
+# ╔═╡ c6042e18-ded0-4685-8279-1afc2aba3a86
+function average(collection)
+	return sum(collection)/length(collection)
+end;
+
+# ╔═╡ 5307435a-97af-4ffa-9201-17863a241735
+function rolling_average(data::Vector{Float64}, window_size::Int)
+	return [average(data[i:min(i+window_size-1, length(data))]) for i in 1:length(data)]
+end;
+
+# ╔═╡ b85fe630-8aa4-465d-950d-f180879cd678
+# --------------- Testing Ground --------------------
+
+# ╔═╡ 58f79543-9320-4284-ab00-8f71c379f610
+# COSTANTS
+
+begin
+	N = 10
+	T = 200
+	γ = 0.95
+	α = 0.01 # 0.01 -> try other later
+	num_episodes = 1000
+	num_trainings = 1
+end;
+
+# ╔═╡ f52adf1b-6bbb-458c-8922-2411c4eb66d0
+env = initialize_gridworld(N, T);
+
+# ╔═╡ 0ebfcbb6-cea0-4590-9ef2-4ca5c3607d00
+θ, rewards_REINFORCE = reinforce(env, num_episodes, γ, α)
+
+# ╔═╡ 389b82be-a5f6-417a-9284-e1ead6b94982
+# --------------- Plotting Ground -------------------
+
+# ╔═╡ 6ac46d08-1c0d-4135-baeb-20d7333413c3
+function plot_learning_curves(
+    rewards_list::Vector{Vector{Float64}},
+	num_trainings::Int;
+    bin::Int=1,
+    x_pos::Int=1,
+    slice_last::Int=0,
+    labels_list=String[],
+    colors_list=[:blue, :red, :green, :blueviolet, :orange, :chocolate, :pink1],
+    annotation_offsets=Float64[],
+    save_figure=false
+)
+	num_episodes = length(rewards_list[1])
+    cutoff = num_episodes - slice_last
+
+    rewards_avg_list = [rolling_average(rewards, bin) for rewards in rewards_list]
+    rewards_avg_cut_list = [rewards_avg[1:cutoff] for rewards_avg in rewards_avg_list]
+
+    plt = plot(
+        rewards_avg_cut_list[1],
+        label="",
+        xlabel="Episode",
+        ylabel="Total reward (moving average over $bin episodes)",
+        title="Learning curves",
+        grid=true,
+        linewidth=1.3,
+        linecolor=colors_list[1],
+        size=(800, 600),
+        dpi=500
+    )
+
+    for i in 2:length(rewards_avg_cut_list)
+        plot!(
+            rewards_avg_cut_list[i],
+            label="",
+            linewidth=1.3,
+            linecolor=colors_list[i]
+        )
+    end
+
+    if !isempty(labels_list)
+        for i in 1:length(rewards_avg_cut_list)
+            annotate!(
+                x_pos,
+                rewards_avg_cut_list[i][x_pos] + (isempty(annotation_offsets) ? 0 : annotation_offsets[i]),
+                text(labels_list[i], :bottom, 10, colors_list[i])
+            )
+        end
+    end
+
+    if save_figure
+		savefig(plt, "learning_curves_$(bin)_bin_$(num_trainings)_runs_$(cutoff)_samples.png")
+	end
+    plot(plt)
+end
+
+# ╔═╡ 8fce2c47-dc6e-4627-892e-4cf611b3982a
+plot_learning_curves([rewards_REINFORCE], num_trainings, bin=50, slice_last=20, x_pos=1, labels_list=["REINFORCE"])
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 
 [compat]
@@ -165,7 +352,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.9.4"
 manifest_format = "2.0"
-project_hash = "4175705a5479c4fec1c97b50b7b639ad8ec900f5"
+project_hash = "b9427ee9ed50061717209759e8a91680990f98cb"
 
 [[deps.AliasTables]]
 deps = ["PtrArrays", "Random"]
@@ -1263,14 +1450,14 @@ version = "1.4.1+2"
 """
 
 # ╔═╡ Cell order:
-# ╠═35b6aa17-3d37-4e42-8594-759f181d1bfe
-# ╠═d050ddc3-ae28-4a2e-a006-e12381c9bfdd
-# ╠═c6042e18-ded0-4685-8279-1afc2aba3a86
-# ╠═5307435a-97af-4ffa-9201-17863a241735
+# ╠═6e1e52fc-b04e-4976-83c6-47cbeb877f53
+# ╠═731e72df-11cd-47f4-bd31-665ef7ad2b1e
+# ╠═5c8c8e1e-fb4a-478d-a342-f78a9fac7486
 # ╠═2ac49d21-013a-4190-842e-ac2312df66eb
 # ╠═45369aa5-2f0c-4787-9492-c9f1e19ace7d
 # ╠═8fd48449-cf2f-45aa-b4a4-23f121ce16e3
 # ╠═a167e758-e560-4d27-8ccb-36d9d1cac015
+# ╠═39937079-e0a4-4bef-99b5-ff602604bbcb
 # ╠═267184ab-f306-4ded-b1bb-72a25f82a527
 # ╠═b59a2e38-c98f-48ff-9319-41e7cfecfa0b
 # ╠═de6869c5-afd7-4c16-9707-504c9abc6853
@@ -1278,9 +1465,23 @@ version = "1.4.1+2"
 # ╠═c362401b-cb06-4119-8094-af7a3cf30628
 # ╠═6a20ba58-fac4-406a-b68a-ba658d2dc60e
 # ╠═88685918-bc20-49c9-bd4d-4fe5e7f5f0c3
+# ╠═918ba363-98ce-477d-8599-2388f4e6b852
+# ╠═3ed4e3f4-aba4-478c-b357-a5ed83605a14
+# ╠═2396a641-87b0-4cd4-9440-b6fd4855b126
 # ╠═70a94cf3-63aa-4a5f-ae58-17698267ed16
 # ╠═b9ec071d-b40a-4fad-8c34-72fa3877bca2
 # ╠═c3015524-5b2c-4919-9d0b-1fd1c5bc478e
 # ╠═3c9b873c-b895-43af-8244-48bb66f2aaf0
+# ╠═35b6aa17-3d37-4e42-8594-759f181d1bfe
+# ╠═d050ddc3-ae28-4a2e-a006-e12381c9bfdd
+# ╠═c6042e18-ded0-4685-8279-1afc2aba3a86
+# ╠═5307435a-97af-4ffa-9201-17863a241735
+# ╠═b85fe630-8aa4-465d-950d-f180879cd678
+# ╠═58f79543-9320-4284-ab00-8f71c379f610
+# ╠═f52adf1b-6bbb-458c-8922-2411c4eb66d0
+# ╠═0ebfcbb6-cea0-4590-9ef2-4ca5c3607d00
+# ╠═389b82be-a5f6-417a-9284-e1ead6b94982
+# ╠═6ac46d08-1c0d-4135-baeb-20d7333413c3
+# ╠═8fce2c47-dc6e-4627-892e-4cf611b3982a
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
