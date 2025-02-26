@@ -4,14 +4,14 @@
 using Markdown
 using InteractiveUtils
 
-# ╔═╡ 731e72df-11cd-47f4-bd31-665ef7ad2b1e
-using LinearAlgebra
-
-# ╔═╡ 5c8c8e1e-fb4a-478d-a342-f78a9fac7486
-using Plots
-
-# ╔═╡ 6e1e52fc-b04e-4976-83c6-47cbeb877f53
+# ╔═╡ 716720d2-a8d3-431c-b027-2fc8671d80e6
 # ------------------ Imports ------------------------
+
+begin
+	using LinearAlgebra
+	using Plots
+	using Statistics
+end
 
 # ╔═╡ 2ac49d21-013a-4190-842e-ac2312df66eb
 # ------------- Environment Set-up ------------------
@@ -125,108 +125,145 @@ end;
 # ╔═╡ 918ba363-98ce-477d-8599-2388f4e6b852
 # --------------- Training Set-up -------------------
 
-# ╔═╡ 2396a641-87b0-4cd4-9440-b6fd4855b126
-function feature_vector(state::State, action::Symbol, N::Int)
-    Δx_apple = state.apple_pos[1] - state.player_pos[1]
-    Δy_apple = state.apple_pos[2] - state.player_pos[2]
-    Δx_monster = state.monster_pos[1] - state.player_pos[1]
-    Δy_monster = state.monster_pos[2] - state.player_pos[2]
-    
-    action_vec = zeros(4)
-    if action == :left
-        action_vec[1] = 1
-    elseif action == :up
-        action_vec[2] = 1
-    elseif action == :right
-        action_vec[3] = 1
-    elseif action == :down
-        action_vec[4] = 1
+# ╔═╡ af078680-a484-4bd1-82c6-d8ad2ab29f5d
+function ε_greedy(Q, state, ε, actions)
+    if rand() < ε
+        return rand(actions)  # exploration
+    else
+        q_values = Q[state]
+        
+        if all(q_values[a] == q_values[actions[1]] for a in actions)
+            return rand(actions)  # exploration if all Q-values are equal
+        else
+            return argmax(a -> q_values[a], actions)  # exploitation
+        end
     end
-    
-    return vcat(Δx_apple, Δy_apple, Δx_monster, Δy_monster, action_vec)
 end;
 
-# ╔═╡ 3ed4e3f4-aba4-478c-b357-a5ed83605a14
-function softmax_policy(state::State, action::Symbol, θ::Vector{Float64}, N::Int)
-    actions = get_actions(state)
-    features = [feature_vector(state, a, N) for a in actions]
-    h = [dot(θ, f) for f in features]
-    exp_h = exp.(h .- maximum(h))
-    prob = exp_h ./ sum(exp_h)
-    return prob[findfirst(isequal(action), actions)]
+# ╔═╡ 2396a641-87b0-4cd4-9440-b6fd4855b126
+function extract_state_features(state::State)
+    player_x, player_y = state.player_pos
+    monster_x, monster_y = state.monster_pos
+    apple_x, apple_y = state.apple_pos
+    
+    # x(s) = (Δx to apple, Δy to apple, Δx to monster, Δy to monster)
+    return [
+        apple_x - player_x,
+        apple_y - player_y,
+        monster_x - player_x,
+        monster_y - player_y
+    ]
+end;
+
+# ╔═╡ 346c7281-630e-4a4c-b488-23471f98aef5
+function extract_state_action_features(state::State, action::Symbol)
+    # Basic state features
+    x_s = extract_state_features(state)
+    
+    # One-hot encoding for actions
+    action_features = zeros(4)
+    if action == :left
+        action_features[1] = 1
+    elseif action == :up
+        action_features[2] = 1
+    elseif action == :right
+        action_features[3] = 1
+    elseif action == :down
+        action_features[4] = 1
+    end
+    
+    # Concatenate state features with action features
+    return vcat(x_s, action_features)
+end;
+
+# ╔═╡ 8454cf51-dd64-4e9d-b3de-ce3b1ca097a7
+function q_hat(state::State, action::Symbol, w::Vector{Float64})
+    x = extract_state_action_features(state, action)
+    return dot(w, x)
+end;
+
+# ╔═╡ 2ee1214e-2fa6-4561-a6ab-aa4e3ada8170
+function ε_greedy_approx(state::State, w::Vector{Float64}, ε::Float64, ACTIONS)
+    if rand() < ε
+        return rand(ACTIONS)
+    else
+        q_values = Dict(a => q_hat(state, a, w) for a in ACTIONS)
+        return argmax(q_values)
+    end
+end;
+
+# ╔═╡ a40c7502-2160-4325-845f-4c893f118d39
+function estimate_q_value(w, state::State, action::Symbol)
+    x_sa = extract_state_action_features(state, action)
+    return dot(w, x_sa)
 end;
 
 # ╔═╡ c2932d76-4922-4fb4-9b63-987ad16e176b
-function compute_∇(θ, state, action, env)
-	actions = get_actions(state)
-	features = [feature_vector(state, a, env.N) for a in actions]
-	h = [dot(θ, f) for f in features]
-	exp_h = exp.(h)
-	prob = exp_h ./ sum(exp_h)
-	
-	grad_log_policy = feature_vector(state, action, env.N) - sum(prob .* features)
-	return grad_log_policy
+function estimate_value(φ, state::State)
+    x_s = extract_state_features(state)
+    return dot(φ, x_s)
 end;
 
-# ╔═╡ 70a94cf3-63aa-4a5f-ae58-17698267ed16
-# --------------- Implementation --------------------
-# ------ Semi-gradient n-step SARSA (page 247) ------
+# ╔═╡ 50e48c39-6792-4635-80aa-5ef138f7c963
+function calculate_h(θ, state::State, action::Symbol)
+    x_sa = extract_state_action_features(state, action)
+    return dot(θ, x_sa)
+end;
+
+# ╔═╡ d4daac25-1906-4cfb-9e81-7aaa08e0813b
+function softmax_policy(θ, state::State, action::Symbol, actions)
+    # Calculate the numerator
+    h_sa = calculate_h(θ, state, action)
+    
+    # Calculate the denominator (sum over all actions)
+    denominator = 0.0
+    for b in actions
+        h_sb = calculate_h(θ, state, b)
+        denominator += exp(h_sb)
+    end
+    
+    return exp(h_sa) / denominator
+end;
+
+# ╔═╡ e5f64d1b-3d0f-447d-aa9e-7e4bc59aa262
+function sample_action(θ, state::State, actions)
+    # Calculate probabilities for all actions
+    probs = [softmax_policy(θ, state, a, actions) for a in actions]
+    
+    # Sample an action based on the probabilities
+    r = rand()
+    cumulative_prob = 0.0
+    for (i, prob) in enumerate(probs)
+        cumulative_prob += prob
+        if r <= cumulative_prob
+            return actions[i]
+        end
+    end
+    
+    # Fallback (should rarely happen due to floating-point precision)
+    return actions[end]
+end;
+
+# ╔═╡ 37820b25-d15e-44fa-b58f-7e1a36c94106
+function log_policy_gradient(θ, state::State, action::Symbol, actions)
+    # Extract features for the selected action
+    x_sa = extract_state_action_features(state, action)
+    
+    # Calculate expected feature for the current policy
+    expected_feature = zeros(length(x_sa))
+    for b in actions
+        prob_b = softmax_policy(θ, state, b, actions)
+        x_sb = extract_state_action_features(state, b)
+        expected_feature += prob_b * x_sb
+    end
+    
+    # The gradient is: x(s,a) - Σᵦ π(b|s;θ)x(s,b)
+    return x_sa - expected_feature
+end;
 
 # ╔═╡ b9ec071d-b40a-4fad-8c34-72fa3877bca2
 # --------------- Implementation --------------------
 # ------------ REINFORCE (page 328) -----------------
-
-function reinforce(env::GridWorld, num_episodes::Int, γ::Float64, α::Float64)
-	actions = get_actions(env)
-    θ = zeros(length(feature_vector(initialize_state(env.N), :left, env.N)))
-	total_rewards = Float64[]
-    
-    for episode in 1:num_episodes
-        state = initialize_state(env.N)
-        episode_states = []
-        episode_actions = []
-        episode_rewards = []
-
-		# Generate episode
-        for t in 0:env.T-1
-            # Choose action based on current policy
-            probs = [softmax_policy(state, a, θ, env.N) for a in actions]
-			cumulative_probs = cumsum(probs)
-			action = actions[findfirst(rand() .≤ cumulative_probs)]
-            
-            # Take action and observe next state and reward
-            next_state, reward, terminal = step(env, state, action)
-            
-            # Store the state, action, and reward
-            push!(episode_states, state)
-            push!(episode_actions, action)
-            push!(episode_rewards, reward)
-            
-            if terminal
-                break
-            end
-            
-            state = next_state
-        end
-
-		total_reward = sum(episode_rewards)
-        push!(total_rewards, total_reward)
-        
-        # Calculate returns and update θ
-        G = 0.0
-        for t in length(episode_states):-1:1 # reverse episode_states
-            G = γ * G + episode_rewards[t]
-            state = episode_states[t]
-            action = episode_actions[t]
-            
-            grad_log_policy = compute_∇(θ, state, action, env)
-            
-            θ += α * (γ^t) * G * grad_log_policy # update 
-        end
-    end
-    
-    return θ, total_rewards
-end;
 
 # ╔═╡ c3015524-5b2c-4919-9d0b-1fd1c5bc478e
 # --------------- Implementation --------------------
@@ -235,6 +272,70 @@ end;
 # ╔═╡ 3c9b873c-b895-43af-8244-48bb66f2aaf0
 # --------------- Implementation --------------------
 # ------- One step actor critic (page 332) ----------
+
+function one_step_actor_critic(env::GridWorld, num_episodes::Int, γ::Float64; 
+                               α_θ::Float64=0.01, α_w::Float64=0.01)
+    # Initialize parameters
+    actions = get_actions(env)
+    
+    # θ for policy and w for value function
+    # Feature dimensions: state=4, state-action=8
+    θ = zeros(8)  # policy parameters (4 state features + 4 action features)
+    w = zeros(4)  # value function parameters (4 state features)
+    
+    # To track performance
+    episode_rewards = zeros(num_episodes)
+    
+    for episode in 1:num_episodes
+        # Initialize state
+        S = initialize_state(env.N)
+        I = 1.0
+        total_reward = 0.0
+        t = 0
+        
+        while t < env.T
+            # Sample action from policy
+            A = sample_action(θ, S, actions)
+            
+            # Take action, observe next state and reward
+            S_next, R, terminal = step(env, S, A)
+            total_reward += R
+            
+            # Calculate TD error
+            if terminal
+                # If terminal, v̂(S') = 0
+                δ = R - estimate_value(w, S)
+            else
+                δ = R + γ * estimate_value(w, S_next) - estimate_value(w, S)
+            end
+            
+            # Update critic (value function)
+            gradient_v = extract_state_features(S)
+            w += α_w * δ * gradient_v
+            
+            # Update actor (policy)
+            gradient_log_π = log_policy_gradient(θ, S, A, actions)
+            θ += α_θ * I * δ * gradient_log_π
+            
+            # Update trace
+            I *= γ
+            
+            # Move to next state
+            S = S_next
+            t += 1
+            
+            # Check for termination
+            if terminal
+                break
+            end
+        end
+        
+        # Record total reward for this episode
+        episode_rewards[episode] = total_reward
+    end
+    
+    return θ, w, episode_rewards
+end
 
 # ╔═╡ 35b6aa17-3d37-4e42-8594-759f181d1bfe
 # ------------- Auxiliary functions -----------------
@@ -248,39 +349,108 @@ function log(debug_mode, messages...)
 	end
 end;
 
-# ╔═╡ c6042e18-ded0-4685-8279-1afc2aba3a86
-function average(collection)
-	return sum(collection)/length(collection)
-end;
+# ╔═╡ 70a94cf3-63aa-4a5f-ae58-17698267ed16
+# --------------- Implementation --------------------
+# ------ Semi-gradient n-step SARSA (page 247) ------
+
+function semi_gradient_n_step_sarsa(env::GridWorld, num_episodes::Int, γ::Float64, α::Float64, ε::Float64, n::Int, debug=false)
+    ACTIONS = get_actions(env)
+    w = zeros(8)
+    
+    episode_rewards = zeros(num_episodes)
+    
+    for episode in 1:num_episodes
+        # Initialize S₀ ≠ terminal
+        state = initialize_state(env.N)
+        # Initialize and store A₀
+        action = ε_greedy_approx(state, w, ε, ACTIONS)
+        
+        # Episode history storage with circular buffer of size n+1
+        S = Vector{State}(undef, n+1)
+        A = Vector{Symbol}(undef, n+1)
+        R = zeros(n+1)
+        
+        S[1] = state
+        A[1] = action
+        
+        T = env.T  # Terminal time
+        t = 0
+        total_reward = 0.0  # Track episode reward
+        
+        log(debug, "----------------------------------", "Episode $episode:")
+        
+        while true
+            if t < T
+                # Take action A_t, observe R_{t+1} and S_{t+1}
+                idx_mod = (t % (n+1)) + 1  # Index for circular buffer
+                new_state, reward, caught_by_monster = step(env, state, action)
+                R[idx_mod] = reward
+                S[(idx_mod % (n+1)) + 1] = new_state
+                
+                # Add reward to episode total
+                total_reward += reward
+                
+                log(debug, "Player at $(new_state.player_pos).")
+                
+                if caught_by_monster
+                    T = t + 1  # Terminate episode
+                    log(debug, "Monster at $(new_state.monster_pos) and player at $(new_state.player_pos) -> GG.")
+                else
+                    # Select and store A_{t+1}
+                    A[(idx_mod % (n+1)) + 1] = ε_greedy_approx(state, w, ε, ACTIONS)
+                end
+            end
+            
+            # τ is the time whose estimate is being updated
+            τ = t - n + 1
+            if τ ≥ 0
+                # Calculate return estimate G
+                G = 0.0
+                for i in τ+1:min(τ+n, T)
+                    idx::Int = (i % (n+1)) + 1
+                    G += γ^(i-τ-1) * R[idx]
+                end
+                
+                # Add bootstrapped value if τ+n < T
+                if τ+n < T
+                    idx_state = ((τ+n) % (n+1)) + 1
+                    idx_action = ((τ+n) % (n+1)) + 1
+                    G += γ^n * estimate_q_value(w, S[idx_state], A[idx_action])
+                end
+                
+                # Get features for the state-action pair being updated
+                idx_τ = (τ % (n+1)) + 1
+                x = extract_state_action_features(S[idx_τ], A[idx_τ])
+                
+                # Update weights: w ← w + α[G - q̂(S_τ, A_τ, w)]∇q̂(S_τ, A_τ, w)
+                # For linear function approximation, gradient is just the feature vector
+                w += α * (G - estimate_q_value(w, S[idx_τ], A[idx_τ])) * x
+            end
+            
+            if τ == T - 1
+                break  # Episode has terminated
+            end
+            
+            # Advance time step
+            t += 1
+            if t < T
+                state = S[((t % (n+1)) + 1)]
+                action = A[((t % (n+1)) + 1)]
+            end
+        end
+        
+        # Record total reward for this episode
+        episode_rewards[episode] = total_reward
+        log(debug, "Got $(total_reward) points this episode.")
+    end
+    
+    return w, episode_rewards
+end
 
 # ╔═╡ 5307435a-97af-4ffa-9201-17863a241735
 function rolling_average(data::Vector{Float64}, window_size::Int)
-	return [average(data[i:min(i+window_size-1, length(data))]) for i in 1:length(data)]
+	return [mean(data[i:min(i+window_size-1, length(data))]) for i in 1:length(data)]
 end;
-
-# ╔═╡ b85fe630-8aa4-465d-950d-f180879cd678
-# --------------- Testing Ground --------------------
-
-# ╔═╡ 58f79543-9320-4284-ab00-8f71c379f610
-# COSTANTS
-
-begin
-	N = 10
-	T = 200
-	γ = 0.95
-	α = 0.01 # 0.01 -> try other later
-	num_episodes = 1100
-	num_trainings = 1
-end;
-
-# ╔═╡ f52adf1b-6bbb-458c-8922-2411c4eb66d0
-env = initialize_gridworld(N, T);
-
-# ╔═╡ 0ebfcbb6-cea0-4590-9ef2-4ca5c3607d00
-θ, rewards_REINFORCE = reinforce(env, num_episodes, γ, α)
-
-# ╔═╡ 389b82be-a5f6-417a-9284-e1ead6b94982
-# --------------- Plotting Ground -------------------
 
 # ╔═╡ 6ac46d08-1c0d-4135-baeb-20d7333413c3
 function plot_learning_curves(
@@ -336,16 +506,98 @@ function plot_learning_curves(
 		savefig(plt, "learning_curves_$(bin)_bin_$(num_trainings)_runs_$(cutoff)_samples.png")
 	end
     plot(plt)
+end;
+
+# ╔═╡ 99e0857c-00b5-47f6-b640-e7352aa47e07
+function random_agent(env, num_episodes)
+	ACTIONS = get_actions(env)
+	rewards_per_episode = Float64[]
+	
+	for episode in 1:num_episodes
+		state = initialize_state(env.N)
+		total_reward = 0.0
+		
+		for t in 1:env.T
+		    action = rand(ACTIONS)
+		    new_state, reward, terminal = step(env, state, action)
+			total_reward += reward
+			
+		    state = new_state
+		    
+			if terminal
+		        break
+		    end
+		end
+
+		push!(rewards_per_episode, total_reward) 
+	end
+
+	return rewards_per_episode
+end;
+
+# ╔═╡ b85fe630-8aa4-465d-950d-f180879cd678
+# --------------- Testing Ground --------------------
+
+# ╔═╡ bfb2bc7f-9ebb-47e4-a8c6-68956d157850
+begin
+	N = 5 # 10
+	T = 10 # 200
+	γ = 0.95 # 0.95
+	α = 0.01 # 0.01 -> try other later
+	num_episodes = 32000
+	num_runs = 1
+	n = 3 # 1, 2, 3
+	ε=0.1
+end;
+
+# ╔═╡ 600cc3d7-7d7f-45a8-80c4-e9c5918f5cc1
+env = initialize_gridworld(N, T)
+
+# ╔═╡ c4ebe6e2-99c3-439c-a6f0-4887284792e4
+# Random walk
+
+begin
+	averaged_rewards_randomwalk = zeros(num_episodes)
+	for training in 1:num_runs
+		rewards_randomwalk = random_agent(env, num_episodes)
+		averaged_rewards_randomwalk .+= rewards_randomwalk
+	end
+	averaged_rewards_randomwalk ./= num_runs
 end
 
-# ╔═╡ 8fce2c47-dc6e-4627-892e-4cf611b3982a
-plot_learning_curves([rewards_REINFORCE], num_trainings, bin=50, slice_last=100, x_pos=1, labels_list=["REINFORCE"])
+# ╔═╡ ad363a1b-ba37-4804-a67c-33722de9522d
+# Semi-gradient n-step SARSA
+
+begin
+	averaged_rewards_sarsa = zeros(num_episodes)
+	for training in 1:num_runs
+		_, rewards_sarsa = semi_gradient_n_step_sarsa(env, num_episodes, γ, α, ε, n)
+		averaged_rewards_sarsa .+= rewards_sarsa
+	end
+	averaged_rewards_sarsa ./= num_runs
+end
+
+# ╔═╡ cd574c91-95c9-4f81-b292-52d2e8be8770
+# One-step Actor Critic Training
+
+begin
+	averaged_rewards_osac = zeros(num_episodes)
+	for training in 1:num_runs
+		_, _, rewards_osac = one_step_actor_critic(env, num_episodes, γ; α_θ=α, α_w=α)
+		averaged_rewards_osac .+= rewards_osac
+	end
+	averaged_rewards_osac ./= num_runs
+end
+
+# ╔═╡ b26fe435-e28b-477b-abf6-5e3b1e83bc41
+plot_learning_curves([averaged_rewards_randomwalk, averaged_rewards_osac, averaged_rewards_sarsa], num_runs, bin=1000, slice_last=2000, x_pos=1, labels_list=["Random Walk", "Action Critic", "SARSA"])
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [compat]
 Plots = "~1.40.9"
@@ -357,7 +609,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.9.4"
 manifest_format = "2.0"
-project_hash = "b9427ee9ed50061717209759e8a91680990f98cb"
+project_hash = "a748474d4d822092634a0ddde00a23b4864b86f2"
 
 [[deps.AliasTables]]
 deps = ["PtrArrays", "Random"]
@@ -1455,9 +1707,7 @@ version = "1.4.1+2"
 """
 
 # ╔═╡ Cell order:
-# ╠═6e1e52fc-b04e-4976-83c6-47cbeb877f53
-# ╠═731e72df-11cd-47f4-bd31-665ef7ad2b1e
-# ╠═5c8c8e1e-fb4a-478d-a342-f78a9fac7486
+# ╠═716720d2-a8d3-431c-b027-2fc8671d80e6
 # ╠═2ac49d21-013a-4190-842e-ac2312df66eb
 # ╠═45369aa5-2f0c-4787-9492-c9f1e19ace7d
 # ╠═8fd48449-cf2f-45aa-b4a4-23f121ce16e3
@@ -1471,23 +1721,32 @@ version = "1.4.1+2"
 # ╠═6a20ba58-fac4-406a-b68a-ba658d2dc60e
 # ╠═88685918-bc20-49c9-bd4d-4fe5e7f5f0c3
 # ╠═918ba363-98ce-477d-8599-2388f4e6b852
-# ╠═3ed4e3f4-aba4-478c-b357-a5ed83605a14
+# ╠═af078680-a484-4bd1-82c6-d8ad2ab29f5d
+# ╠═8454cf51-dd64-4e9d-b3de-ce3b1ca097a7
+# ╠═a40c7502-2160-4325-845f-4c893f118d39
+# ╠═2ee1214e-2fa6-4561-a6ab-aa4e3ada8170
 # ╠═2396a641-87b0-4cd4-9440-b6fd4855b126
+# ╠═346c7281-630e-4a4c-b488-23471f98aef5
 # ╠═c2932d76-4922-4fb4-9b63-987ad16e176b
+# ╠═50e48c39-6792-4635-80aa-5ef138f7c963
+# ╠═d4daac25-1906-4cfb-9e81-7aaa08e0813b
+# ╠═e5f64d1b-3d0f-447d-aa9e-7e4bc59aa262
+# ╠═37820b25-d15e-44fa-b58f-7e1a36c94106
 # ╠═70a94cf3-63aa-4a5f-ae58-17698267ed16
 # ╠═b9ec071d-b40a-4fad-8c34-72fa3877bca2
 # ╠═c3015524-5b2c-4919-9d0b-1fd1c5bc478e
 # ╠═3c9b873c-b895-43af-8244-48bb66f2aaf0
 # ╠═35b6aa17-3d37-4e42-8594-759f181d1bfe
 # ╠═d050ddc3-ae28-4a2e-a006-e12381c9bfdd
-# ╠═c6042e18-ded0-4685-8279-1afc2aba3a86
 # ╠═5307435a-97af-4ffa-9201-17863a241735
-# ╠═b85fe630-8aa4-465d-950d-f180879cd678
-# ╠═58f79543-9320-4284-ab00-8f71c379f610
-# ╠═f52adf1b-6bbb-458c-8922-2411c4eb66d0
-# ╠═0ebfcbb6-cea0-4590-9ef2-4ca5c3607d00
-# ╠═389b82be-a5f6-417a-9284-e1ead6b94982
 # ╠═6ac46d08-1c0d-4135-baeb-20d7333413c3
-# ╠═8fce2c47-dc6e-4627-892e-4cf611b3982a
+# ╠═99e0857c-00b5-47f6-b640-e7352aa47e07
+# ╠═b85fe630-8aa4-465d-950d-f180879cd678
+# ╠═bfb2bc7f-9ebb-47e4-a8c6-68956d157850
+# ╠═600cc3d7-7d7f-45a8-80c4-e9c5918f5cc1
+# ╠═c4ebe6e2-99c3-439c-a6f0-4887284792e4
+# ╠═ad363a1b-ba37-4804-a67c-33722de9522d
+# ╠═cd574c91-95c9-4f81-b292-52d2e8be8770
+# ╠═b26fe435-e28b-477b-abf6-5e3b1e83bc41
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
