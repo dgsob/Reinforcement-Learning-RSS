@@ -440,30 +440,6 @@ function one_step_actor_critic(env::GridWorld, num_episodes::Int, α_θ, α_w)
     return rewards_per_episode, θ, w
 end
 
-# Random policy for comparison
-function random_agent(env::GridWorld, num_episodes::Int)
-    rewards_per_episode = zeros(num_episodes)
-
-    for episode in 1:num_episodes
-        S = initialize(env)
-        terminal = false
-        step_count = 0
-        total_reward = 0.0
-
-        while !terminal && step_count < env.T
-            A = rand(ACTIONS)
-            S_next, R, terminal = step(env, S, A)
-            total_reward += R
-            S = S_next
-            step_count += 1
-        end
-
-        rewards_per_episode[episode] = total_reward
-    end
-
-    return rewards_per_episode
-end
-
 # ======== EVALUATION AND PLOTTING ========
 function moving_average(x, window_size)
     result = zeros(length(x))
@@ -535,7 +511,6 @@ function run_experiment(num_episodes=1500, num_runs=5, window_size=150, learning
     avarage_reinforce_rewards = zeros(num_episodes)
     avarage_reinforce_baseline_rewards = zeros(num_episodes)
     avarage_actor_critic_rewards = zeros(num_episodes)
-    # avarage_random_rewards = zeros(num_episodes)
 
     # Run all algorithms
     for i in 1:num_runs
@@ -558,9 +533,6 @@ function run_experiment(num_episodes=1500, num_runs=5, window_size=150, learning
 
         actor_critic_rewards, _, _ = one_step_actor_critic(env, num_episodes, 1.0, 1.0)
         avarage_actor_critic_rewards .+= actor_critic_rewards
-
-        # random_rewards = random_agent(env, num_episodes)
-        # avarage_random_rewards .+= random_rewards
     end
 
     avarage_sarsa_1_rewards ./= num_runs
@@ -569,7 +541,6 @@ function run_experiment(num_episodes=1500, num_runs=5, window_size=150, learning
     avarage_reinforce_rewards ./= num_runs
     avarage_reinforce_baseline_rewards ./= num_runs
     avarage_actor_critic_rewards ./= num_runs
-    # avarage_random_rewards ./= num_runs
     
     # Calculate moving averages
     sarsa_1_ma = moving_average(avarage_sarsa_1_rewards, window_size)
@@ -578,7 +549,6 @@ function run_experiment(num_episodes=1500, num_runs=5, window_size=150, learning
     reinforce_ma = moving_average(avarage_reinforce_rewards, window_size)
     reinforce_baseline_ma = moving_average(avarage_reinforce_baseline_rewards, window_size)
     actor_critic_ma = moving_average(avarage_actor_critic_rewards, window_size)
-    # random_ma = moving_average(avarage_random_rewards, window_size)
     
     # Create data dictionary for plotting
     data_dict = Dict(
@@ -588,14 +558,11 @@ function run_experiment(num_episodes=1500, num_runs=5, window_size=150, learning
         "REINFORCE" => reinforce_ma,
         "REINFORCE with baseline" => reinforce_baseline_ma,
         "Actor-Critic" => actor_critic_ma
-        # "Random Agent" => random_ma
     )
     
     # Define methods order and create plot
     methods_order = ["1-step SARSA", "2-step SARSA", "3-step SARSA", "REINFORCE", 
-                     "REINFORCE with baseline", "Actor-Critic", 
-                    #  "Random Agent"
-                     ]
+                     "REINFORCE with baseline", "Actor-Critic"]
 
     y_offsets_dict = Dict(
         "1-step SARSA" => 0.5,
@@ -604,7 +571,6 @@ function run_experiment(num_episodes=1500, num_runs=5, window_size=150, learning
         "REINFORCE" => 2.75,
         "REINFORCE with baseline" => 3.5,
         "Actor-Critic" => 4.25
-        # "Random Agent" => 0.05
     )
     
     plot_learning_curves(
