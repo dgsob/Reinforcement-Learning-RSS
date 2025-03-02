@@ -160,7 +160,7 @@ function softmax(x)
     return ex ./ sum(ex)
 end
 
-function epsilon_greedy_policy(state::State, w::Vector{Float64}, ε=0.1)
+function epsilon_greedy_policy(state::State, w::Vector{Float64}, ε::Float64)
     if rand() < ε
         return rand(ACTIONS)
     else
@@ -168,6 +168,14 @@ function epsilon_greedy_policy(state::State, w::Vector{Float64}, ε=0.1)
         best_action_idx = argmax(q_values)
         return ACTIONS[best_action_idx]
     end
+end
+
+function get_decaying_ε(state, w) # TODO: make sure this adapts to softmax exploration level correctly
+    probs = softmax_policy(state, w)
+    max_prob = maximum(values(probs))
+
+    ε = 1 - max_prob
+    return ε
 end
 
 function sample_action(probs_dict::Dict{Symbol, Float64})
@@ -200,7 +208,7 @@ end
 # ======== ALGORITHMS ========
 
 # Semi-gradient n-step SARSA
-function semi_gradient_nstep_sarsa(env::GridWorld, n::Int, num_episodes::Int, α, ε=0.1)
+function semi_gradient_nstep_sarsa(env::GridWorld, n::Int, num_episodes::Int, α)
     # Initialize weights
     d = length(extract_features(initialize(env), :left))
     w = zeros(d)
@@ -209,7 +217,7 @@ function semi_gradient_nstep_sarsa(env::GridWorld, n::Int, num_episodes::Int, α
     for episode in 1:num_episodes
         # Initialize
         S = initialize(env)
-        A = epsilon_greedy_policy(S, w, ε)
+        A = epsilon_greedy_policy(S, w, get_decaying_ε(S, w))
         
         states = Vector{State}()
         actions = Vector{Symbol}()
@@ -233,7 +241,7 @@ function semi_gradient_nstep_sarsa(env::GridWorld, n::Int, num_episodes::Int, α
                 if terminal
                     T = t + 1
                 else
-                    A_next = epsilon_greedy_policy(S_next, w, ε)
+                    A_next = epsilon_greedy_policy(S_next, w, get_decaying_ε(S_next, w))
                     push!(actions, A_next)
                 end
             end
@@ -602,17 +610,16 @@ function evaluate_policy(env::GridWorld, policy_fn, num_episodes=100)
     return mean(total_rewards), std(total_rewards)
 end
 
-function train_and_plot(env, methods, num_episodes, num_runs, window_size=nothing)
-    average_rewards_dict = Dict{String, Vector{Float64}}()
+function visualise_training(env, methods, num_episodes, num_runs, window_size=nothing)
+    rewards_per_episode_dict = Dict{String, Vector{Float64}}()
     moving_averages_dict = Dict{String, Vector{Float64}}()
-    trained_params = Dict()
 
     if window_size === nothing
         window_size = Int(num_episodes/10)
     end
     
     for method in methods
-        average_rewards_dict[method] = zeros(num_episodes)
+        rewards_per_episode_dict[method] = zeros(num_episodes)
     end
 
     for i in 1:num_runs
@@ -623,49 +630,33 @@ function train_and_plot(env, methods, num_episodes, num_runs, window_size=nothin
             rewards = Vector{Float64}()
             
             if method == "1-step SARSA"
-                rewards, w = semi_gradient_nstep_sarsa(env, 1, num_episodes, 0.1)
-                if i == num_runs  # Save weights from last run for evaluation
-                    trained_params[method] = w
-                end
+                rewards, _ = semi_gradient_nstep_sarsa(env, 1, num_episodes, 0.1)
             elseif method == "2-step SARSA"
-                rewards, w = semi_gradient_nstep_sarsa(env, 2, num_episodes, 0.1)
-                if i == num_runs
-                    trained_params[method] = w
-                end
+                rewards, _ = semi_gradient_nstep_sarsa(env, 2, num_episodes, 0.1)
             elseif method == "3-step SARSA"
-                rewards, w = semi_gradient_nstep_sarsa(env, 3, num_episodes, 0.1)
-                if i == num_runs
-                    trained_params[method] = w
-                end
+                rewards, _ = semi_gradient_nstep_sarsa(env, 3, num_episodes, 0.1)
             elseif method == "REINFORCE"
-                rewards, θ = reinforce(env, num_episodes, 0.1)
-                if i == num_runs
-                    trained_params[method] = θ
-                end
+                rewards, _ = reinforce(env, num_episodes, 0.1)
             elseif method == "REINFORCE with baseline"
-                rewards, θ, _ = reinforce_with_baseline(env, num_episodes, 0.1, 0.1)
-                if i == num_runs
-                    trained_params[method] = θ
-                end
+                rewards, _, _ = reinforce_with_baseline(env, num_episodes, 0.1, 0.1)
             elseif method == "Actor-Critic"
-                rewards, θ, _ = one_step_actor_critic(env, num_episodes, 1.0, 1.0)
-                if i == num_runs
-                    trained_params[method] = θ
-                end
+                rewards, _, _ = one_step_actor_critic(env, num_episodes, 1.0, 1.0)
+            else
+                error("Unsupported method: $method. Not in $methods.")
             end
             
-            average_rewards_dict[method] .+= rewards
+            rewards_per_episode_dict[method] .+= rewards
         end
     end
     
     # Calculate averages
     for method in methods
-        average_rewards_dict[method] ./= num_runs
+        rewards_per_episode_dict[method] ./= num_runs
     end
     
     # Calculate moving averages
     for method in methods
-        moving_averages_dict[method] = moving_average(average_rewards_dict[method], window_size)
+        moving_averages_dict[method] = moving_average(rewards_per_episode_dict[method], window_size)
     end
     
     # Plot learning curves
@@ -677,8 +668,31 @@ function train_and_plot(env, methods, num_episodes, num_runs, window_size=nothin
         shitf_x_pos_to_left_by=5,
         methods_order=methods
     )
-    
-    return moving_averages_dict, trained_params
+end
+
+function train(env, methods, num_episodes)
+    method_params = Dict{String, Vector{Float64}}()
+
+    for method in methods        
+        if method == "1-step SARSA"
+            _, params = semi_gradient_nstep_sarsa(env, 1, num_episodes, 0.1)
+        elseif method == "2-step SARSA"
+            _, params = semi_gradient_nstep_sarsa(env, 2, num_episodes, 0.1)
+        elseif method == "3-step SARSA"
+            _, params = semi_gradient_nstep_sarsa(env, 3, num_episodes, 0.1)
+        elseif method == "REINFORCE"
+            _, params = reinforce(env, num_episodes, 0.1)
+        elseif method == "REINFORCE with baseline"
+            _, params, _ = reinforce_with_baseline(env, num_episodes, 0.1, 0.1)
+        elseif method == "Actor-Critic"
+            _, params, _ = one_step_actor_critic(env, num_episodes, 1.0, 1.0)
+        else
+            error("Unsupported method: $method. Not in $methods.")
+        end
+
+        method_params[method] = params
+    end
+    return method_params
 end
 
 function evaluate(env, methods, trained_params, num_eval_episodes, num_eval_runs)
@@ -710,32 +724,41 @@ function evaluate(env, methods, trained_params, num_eval_episodes, num_eval_runs
         evaluation_results[method] = (mean_reward, std_reward)
     end
     
-    # Display evaluation results
-    println("\nEvaluation Results:")
+    return evaluation_results
+end
+
+function print_evaluation(evaluation_results, methods)
+    println("Evaluation Results:")
     println("==================")
     for method in methods
         mean_reward, std_reward = evaluation_results[method]
         println("$method: Mean reward = $mean_reward ± $std_reward")
     end
-    
-    return evaluation_results
 end
 
 function run_experiment(num_train_episodes, num_train_runs, window_size, 
-                       num_eval_episodes, num_eval_runs)
+                       num_eval_episodes, num_eval_runs, obtain_learning_curves=true, perform_evaluation=false)
     env = GridWorld(10, 200, 0.95)
     methods = ["1-step SARSA", "2-step SARSA", "3-step SARSA", "REINFORCE",
                "REINFORCE with baseline", "Actor-Critic"]
     
-    # Train algorithms
-    println("Training algorithms...")
-    moving_averages, trained_params = train_and_plot(env, methods, num_train_episodes, num_train_runs, window_size)
-    
-    # Evaluate trained algorithms
-    println("Evaluating trained algorithms...")
-    evaluation_results = evaluate(env, methods, trained_params, num_eval_episodes, num_eval_runs)
-    
-    return moving_averages, evaluation_results
+    # Plot learning curves if obtain_learning_curves true
+    if obtain_learning_curves
+        println("Colleting plotting data from multiple trainings...")
+        visualise_training(env, methods, num_train_episodes, num_train_runs, window_size)
+    end
+
+    # Evaluate if perform_evaluation true
+    if perform_evaluation
+        # Train algorithms
+        println("Training...")
+        trained_params = train(env, methods, num_train_episodes)
+        # Evaluate algorithms
+        println("Evaluating learned policies...")
+        evaluation_results = evaluate(env, methods, trained_params, num_eval_episodes, num_eval_runs)
+        # Display evaluation results
+        print_evaluation(evaluation_results, methods)
+    end
 end
 
 # Main function to run the experiment
@@ -746,7 +769,7 @@ function main()
 
     # Run the main experiment
     println("Running main experiment...")
-    run_experiment(150, 10, 15, 100, 1)
+    run_experiment(150, 100, 10, 150, 100, true, true)
     
     println("Experiments completed. Results saved as PNG files.")
 end
