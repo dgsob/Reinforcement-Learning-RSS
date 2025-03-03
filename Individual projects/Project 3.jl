@@ -148,16 +148,21 @@ function v_value_function(state::State, w::Vector{Float64})
     return dot(w, extract_state_features(state))
 end
 
-function softmax_policy(state::State, θ::Vector{Float64})
+function softmax_policy(state::State, θ::Vector{Float64}, τ=1.0)
     # π(a|s; θ) = exp(θᵀx(s, a)) / Σ_b exp(θᵀx(s, b))
     logits = [dot(θ, extract_features(state, a)) for a in ACTIONS]
-    probs = softmax(logits)
+    probs = softmax(logits, τ)
     return Dict(ACTIONS[i] => probs[i] for i in 1:length(ACTIONS))
 end
 
-function softmax(x)
-    ex = exp.(x .- maximum(x))
+function softmax(x, τ)
+    ex = exp.((x .- maximum(x)) ./ τ)
     return ex ./ sum(ex)
+end
+
+function get_adaptive_τ(episode)
+    max_τ = 15
+    return max_τ * 1/episode
 end
 
 function epsilon_greedy_policy(state::State, w::Vector{Float64}, ε::Float64)
@@ -170,11 +175,13 @@ function epsilon_greedy_policy(state::State, w::Vector{Float64}, ε::Float64)
     end
 end
 
-function get_decaying_ε(state, w) # TODO: make sure this adapts to softmax exploration level correctly
-    probs = softmax_policy(state, w)
+function get_adaptive_ε(state, w, episode) # TODO: make sure this adapts to softmax exploration level correctly
+    probs = softmax_policy(state, w, get_adaptive_τ(episode))
     max_prob = maximum(values(probs))
 
-    ε = 1 - max_prob
+    softmax_exploration = 1 - max_prob
+
+    ε = softmax_exploration * 1/episode
     return ε
 end
 
@@ -190,11 +197,11 @@ function sample_action(probs_dict::Dict{Symbol, Float64})
     return first(keys(probs_dict))  # Fallback
 end
 
-function policy_gradient(state::State, action::Symbol, θ::Vector{Float64})
+function policy_gradient(state::State, action::Symbol, θ::Vector{Float64}, τ=1.0)
     # ∇_θ log π(a|s; θ) = x(s, a) - Σ_b π(b|s; θ)x(s, b)
     action_features = extract_features(state, action)
     
-    probs = softmax_policy(state, θ)
+    probs = softmax_policy(state, θ, τ)
     weighted_sum = zeros(length(action_features))
     
     for a in ACTIONS
@@ -217,7 +224,7 @@ function semi_gradient_nstep_sarsa(env::GridWorld, n::Int, num_episodes::Int, α
     for episode in 1:num_episodes
         # Initialize
         S = initialize(env)
-        A = epsilon_greedy_policy(S, w, get_decaying_ε(S, w))
+        A = epsilon_greedy_policy(S, w, get_adaptive_ε(S, w, episode))
         
         states = Vector{State}()
         actions = Vector{Symbol}()
@@ -241,7 +248,7 @@ function semi_gradient_nstep_sarsa(env::GridWorld, n::Int, num_episodes::Int, α
                 if terminal
                     T = t + 1
                 else
-                    A_next = epsilon_greedy_policy(S_next, w, get_decaying_ε(S_next, w))
+                    A_next = epsilon_greedy_policy(S_next, w, get_adaptive_ε(S_next, w, episode))
                     push!(actions, A_next)
                 end
             end
@@ -292,7 +299,7 @@ function reinforce(env::GridWorld, num_episodes::Int, α)
         total_reward = 0.0
         
         while !terminal && step_count < env.T
-            probs = softmax_policy(S, θ)
+            probs = softmax_policy(S, θ, get_adaptive_τ(episode))
             A = sample_action(probs)
             push!(actions, A)
             
@@ -316,7 +323,7 @@ function reinforce(env::GridWorld, num_episodes::Int, α)
         
         # Update policy parameters
         for t in 1:length(actions)
-            grad = policy_gradient(states[t], actions[t], θ)
+            grad = policy_gradient(states[t], actions[t], θ, get_adaptive_τ(episode))
             θ .+= α * G[t] * grad
         end
         
@@ -348,7 +355,7 @@ function reinforce_with_baseline(env::GridWorld, num_episodes::Int, α_θ, α_w)
         total_reward = 0.0
         
         while !terminal && step_count < env.T
-            probs = softmax_policy(S, θ)
+            probs = softmax_policy(S, θ, get_adaptive_τ(episode))
             A = sample_action(probs)
             push!(actions, A)
             
@@ -381,7 +388,7 @@ function reinforce_with_baseline(env::GridWorld, num_episodes::Int, α_θ, α_w)
             w .+= α_w * δ * state_features
             
             # Update policy parameters
-            grad = policy_gradient(states[t], actions[t], θ)
+            grad = policy_gradient(states[t], actions[t], θ, get_adaptive_τ(episode))
             θ .+= α_θ * δ * grad
         end
         
@@ -410,7 +417,7 @@ function one_step_actor_critic(env::GridWorld, num_episodes::Int, α_θ, α_w)
         
         while !terminal && step_count < env.T
             # Select action
-            probs = softmax_policy(S, θ)
+            probs = softmax_policy(S, θ, get_adaptive_τ(episode))
             A = sample_action(probs)
             
             # Take action
@@ -433,7 +440,7 @@ function one_step_actor_critic(env::GridWorld, num_episodes::Int, α_θ, α_w)
             w .+= α_w * δ * state_features
             
             # Update policy parameters
-            grad = policy_gradient(S, A, θ)
+            grad = policy_gradient(S, A, θ, get_adaptive_τ(episode))
             θ .+= α_θ * I * δ * grad
             
             # Update for next iteration
