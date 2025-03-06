@@ -263,6 +263,10 @@ function softmax_policy(state, θ, τ=1.0)
     return sample(1:4, Weights(probs))
 end
 
+function get_epsilon(episode::Int, ε_init=0.1, ε_final=0.1, ε_decay=1.0)
+    return max(ε_final, ε_init * (ε_decay^episode))
+end
+
 # Decaying temperature parameter for softmax exploration control
 function get_temperature(episode::Int, τ_init=1.0, τ_final=1.0, τ_decay=1.0)
     return max(τ_final, τ_init * (τ_decay^episode))
@@ -273,7 +277,7 @@ end
 ###########################################
 
 # Semi-gradient n-step SARSA (page 247 in Sutton RLI)
-function semi_gradient_n_step_sarsa(env::GridWorld, n::Int, α::Float64, ε::Float64, γ::Float64, num_episodes::Int)
+function semi_gradient_n_step_sarsa(env::GridWorld, n::Int, α::Float64, γ::Float64, num_episodes::Int)
     # Initialize weights for action-value function
     w = 0.01 * randn(4)  # Small random weights for 4 features
     
@@ -281,6 +285,9 @@ function semi_gradient_n_step_sarsa(env::GridWorld, n::Int, α::Float64, ε::Flo
     returns_per_episode = zeros(num_episodes)
     
     for episode in 1:num_episodes
+        # Decaying epsilon
+        ε = get_epsilon(episode)
+
         # Initialize state
         state = initialize!(env)
         action = epsilon_greedy_policy(state, w, ε)
@@ -597,7 +604,7 @@ function experiment_learning_rates(num_episodes::Int, num_runs::Int=5)
         for run in 1:num_runs
             Random.seed!(38 + run * 95)
             env = GridWorld(N, T)
-            _, returns = semi_gradient_n_step_sarsa(env, 1, α, 0.1, γ, num_episodes)
+            _, returns = semi_gradient_n_step_sarsa(env, 1, α, γ, num_episodes)
             push!(all_returns, returns)
         end
         # Average the returns across runs
@@ -715,7 +722,6 @@ end
 # Run experiments to compare value-based vs policy gradient methods
 function experiment_value_vs_policy(best_alphas::Dict, num_episodes::Int, num_runs::Int=5)
     γ = 0.95
-    ε = 0.1
     N = 10  # Grid size
     T = 200  # Maximum episode length
     
@@ -737,7 +743,7 @@ function experiment_value_vs_policy(best_alphas::Dict, num_episodes::Int, num_ru
         for run in 1:num_runs
             Random.seed!(38 + run * 95)
             env = GridWorld(N, T)
-            _, returns = semi_gradient_n_step_sarsa(env, n, sarsa_α, ε, γ, num_episodes)
+            _, returns = semi_gradient_n_step_sarsa(env, n, sarsa_α, γ, num_episodes)
             push!(all_returns, returns)
         end
         value_based_results["$n-step SARSA"] = mean(all_returns)
@@ -874,7 +880,7 @@ function main()
     num_episodes = 150
     
     # Number of runs for averaging results (due to high variance)
-    num_runs = 5
+    num_runs = 20
 
     # Moving average window
     window_size = 10
