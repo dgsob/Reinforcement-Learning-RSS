@@ -224,18 +224,20 @@ end
 
 # Apply softmax
 function softmax(h, τ=1.0)
-    exp_vals = exp.((h .- maximum(h)) ./ τ) # normalized, otherwise we get NaNs and Infs
+    exp_vals = exp.((h .- maximum(h)) ./ τ) # subtract maximum for numerical stability
     return exp_vals ./ sum(exp_vals) # probabilities
 end
 
 # Expected features under policy π
 function expected_features(state, θ, τ=1.0)
-    # E[x(s,b)] = Σ_b π(b|s)x(s,b)
-    probs = softmax(state, θ, τ)
+    # Get probabilities for each action
+    h_values = [get_h(state, a, θ) for a in 1:4]
+    probs = softmax(h_values, τ)
     
+    # E[x(s,b)] = Σ_b π(b|s)x(s,b)
     ef = zeros(length(state_action_features(state, 1)))
-    for a in 1:4
-        ef += probs[a] * state_action_features(state, a)
+    for b in 1:4
+        ef += probs[b] * state_action_features(state, b)
     end
     
     return ef
@@ -263,13 +265,14 @@ function softmax_policy(state, θ, τ=1.0)
     return sample(1:4, Weights(probs))
 end
 
-function get_epsilon(episode::Int, ε_init=0.1, ε_final=0.1, ε_decay=1.0)
-    return max(ε_final, ε_init * (ε_decay^episode))
+# Decaying epsilon parameter for epsilon-greedy exploration control
+function get_epsilon(episode::Int, ε_init=1.0, ε_final=0.01)
+    return max(ε_final, ε_init / episode)
 end
 
 # Decaying temperature parameter for softmax exploration control
-function get_temperature(episode::Int, τ_init=1.0, τ_final=1.0, τ_decay=1.0)
-    return max(τ_final, τ_init * (τ_decay^episode))
+function get_temperature(episode::Int, τ_init=2.0, τ_final=0.01)
+    return max(τ_final, τ_init / episode)
 end
 
 ###########################################
@@ -880,7 +883,7 @@ function main()
     num_episodes = 150
     
     # Number of runs for averaging results (due to high variance)
-    num_runs = 20
+    num_runs = 25
 
     # Moving average window
     window_size = 10
