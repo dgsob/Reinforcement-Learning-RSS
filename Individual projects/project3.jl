@@ -216,35 +216,29 @@ function state_features(state)
 end
 
 # Function h(s,a;θ) for softmax policy
-function h(state, action, θ)
+function get_h(state, action, θ)
     # Linear combination of features and weights
     features = state_action_features(state, action)
     return dot(θ, features)
 end
 
-# Softmax calculation
-function softmax(state, θ)
-    # Calculate h(s,a,θ) for all actions
-    h_values = [h(state, a, θ) for a in 1:4]
-    
-    # Apply softmax
-    exp_values = exp.(h_values)
-    probs = exp_values ./ sum(exp_values)
-    
-    return probs
+# Apply softmax
+function softmax(h, τ=1.0)
+    exp_vals = exp.((h .- maximum(h)) ./ τ) # normalized, otherwise we get NaNs and Infs
+    return exp_vals ./ sum(exp_vals) # probabilities
 end
 
 # Expected features under policy π
-function expected_features(state, θ)
+function expected_features(state, θ, τ=1.0)
     # E[x(s,b)] = Σ_b π(b|s)x(s,b)
-    probs = softmax(state, θ)
+    probs = softmax(state, θ, τ)
     
-    exp_feat = zeros(length(state_action_features(state, 1)))
+    ef = zeros(length(state_action_features(state, 1)))
     for a in 1:4
-        exp_feat += probs[a] * state_action_features(state, a)
+        ef += probs[a] * state_action_features(state, a)
     end
     
-    return exp_feat
+    return ef
 end
 
 # ε-greedy action selection based on value
@@ -260,9 +254,18 @@ function epsilon_greedy_policy(state, w, ε)
 end
 
 # Softmax action selection based on policy π(a|s;θ)
-function softmax_policy(state, θ)
-    probs = softmax(state, θ)
+function softmax_policy(state, θ, τ=1.0)
+    # Calculate h(s,a,θ) for all actions
+    h_values = [get_h(state, a, θ) for a in 1:4]
+
+    # Get probabilities
+    probs = softmax(h_values, τ)
     return sample(1:4, Weights(probs))
+end
+
+# Decaying temperature parameter for softmax exploration control
+function get_temperature(episode::Int, τ_init=1.0, τ_final=1.0, τ_decay=1.0)
+    return max(τ_final, τ_init * (τ_decay^episode))
 end
 
 ###########################################
@@ -370,6 +373,9 @@ function reinforce(env::GridWorld, α::Float64, γ::Float64, num_episodes::Int)
     returns_per_episode = zeros(num_episodes)
     
     for episode in 1:num_episodes
+        # Decaying temperature
+        τ = get_temperature(episode)
+
         # Generate an episode
         S = Vector{Vector{Int}}()
         A = Vector{Int}()
@@ -384,7 +390,7 @@ function reinforce(env::GridWorld, α::Float64, γ::Float64, num_episodes::Int)
         
         while !terminal
             # Select action from policy
-            action = softmax_policy(state, θ)
+            action = softmax_policy(state, θ, τ)
             push!(A, action)
             
             # Take action, observe next state and reward
@@ -435,6 +441,9 @@ function reinforce_with_baseline(env::GridWorld, α_θ::Float64, α_w::Float64, 
     returns_per_episode = zeros(num_episodes)
     
     for episode in 1:num_episodes
+        # Decaying temperature
+        τ = get_temperature(episode)
+
         # Generate an episode
         S = Vector{Vector{Int}}()
         A = Vector{Int}()
@@ -449,7 +458,7 @@ function reinforce_with_baseline(env::GridWorld, α_θ::Float64, α_w::Float64, 
         
         while !terminal
             # Select action from policy
-            action = softmax_policy(state, θ)
+            action = softmax_policy(state, θ, τ)
             push!(A, action)
             
             # Take action, observe next state and reward
@@ -504,6 +513,9 @@ function one_step_actor_critic(env::GridWorld, α_θ::Float64, α_w::Float64, γ
     returns_per_episode = zeros(num_episodes)
     
     for episode in 1:num_episodes
+        # Decaying temperature
+        τ = get_temperature(episode)
+
         # Initialize state
         state = initialize!(env)
         I = 1.0  # Importance sampling ratio (always 1 in our case)
@@ -514,7 +526,7 @@ function one_step_actor_critic(env::GridWorld, α_θ::Float64, α_w::Float64, γ
         
         while !terminal && step_count < env.T
             # Select action from policy
-            action = softmax_policy(state, θ)
+            action = softmax_policy(state, θ, τ)
             
             # Take action, observe next state and reward
             next_state, reward, terminal = step!(env, action)
