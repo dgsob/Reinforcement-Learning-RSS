@@ -593,13 +593,10 @@ function experiment_learning_rates(num_episodes::Int, num_runs::Int=5)
     
     # Results dictionary for each algorithm
     results = Dict()
-    best_alphas = Dict()
     
     # 1. Semi-gradient 1-step SARSA
     println("== Testing learning rates for semi-gradient 1-step SARSA ==")
     sarsa_results = Dict()
-    best_sarsa_perf = -Inf
-    best_sarsa_α = 0.01
     
     for α in α_values
         println("Running with α = $α")
@@ -614,23 +611,16 @@ function experiment_learning_rates(num_episodes::Int, num_runs::Int=5)
         avg_returns = mean(all_returns)
         sarsa_results[α] = avg_returns
         
-        # Check if this is the best performance
+        # Show final performance metric
         final_perf = mean(avg_returns[end-99:end])
-        if final_perf > best_sarsa_perf
-            best_sarsa_perf = final_perf
-            best_sarsa_α = α
-        end
+        println("  α = $α | Final Avg Return: $final_perf")
     end
     
     results["1-step SARSA"] = sarsa_results
-    best_alphas["SARSA"] = best_sarsa_α
-    println("Best learning rate for SARSA: $(best_sarsa_α)")
     
     # 2. REINFORCE
     println("== Testing learning rates for REINFORCE ==")
     reinforce_results = Dict()
-    best_reinforce_perf = -Inf
-    best_reinforce_α = 0.01
     
     for α in α_values
         println("Running with α = $α")
@@ -645,23 +635,16 @@ function experiment_learning_rates(num_episodes::Int, num_runs::Int=5)
         avg_returns = mean(all_returns)
         reinforce_results[α] = avg_returns
         
-        # Check if this is the best performance
+        # Show final performance metric
         final_perf = mean(avg_returns[end-99:end])
-        if final_perf > best_reinforce_perf
-            best_reinforce_perf = final_perf
-            best_reinforce_α = α
-        end
+        println("  α = $α | Final Avg Return: $final_perf")
     end
     
     results["REINFORCE"] = reinforce_results
-    best_alphas["REINFORCE"] = best_reinforce_α
-    println("Best learning rate for REINFORCE: $(best_reinforce_α)")
     
     # 3. REINFORCE with baseline
     println("== Testing learning rates for REINFORCE with baseline ==")
     reinforce_baseline_results = Dict()
-    best_reinforce_baseline_perf = -Inf
-    best_reinforce_baseline_α = 0.01
     
     for α in α_values
         println("Running with α = $α")
@@ -676,23 +659,16 @@ function experiment_learning_rates(num_episodes::Int, num_runs::Int=5)
         avg_returns = mean(all_returns)
         reinforce_baseline_results[α] = avg_returns
         
-        # Check if this is the best performance
+        # Show final performance metric
         final_perf = mean(avg_returns[end-99:end])
-        if final_perf > best_reinforce_baseline_perf
-            best_reinforce_baseline_perf = final_perf
-            best_reinforce_baseline_α = α
-        end
+        println("  α = $α | Final Avg Return: $final_perf")
     end
     
     results["REINFORCE with baseline"] = reinforce_baseline_results
-    best_alphas["REINFORCE with baseline"] = best_reinforce_baseline_α
-    println("Best learning rate for REINFORCE with baseline: $(best_reinforce_baseline_α)")
     
     # 4. One-step Actor-Critic
     println("== Testing learning rates for One-step Actor-Critic ==")
     actor_critic_results = Dict()
-    best_actor_critic_perf = -Inf
-    best_actor_critic_α = 0.01
     
     for α in α_values
         println("Running with α = $α")
@@ -707,19 +683,14 @@ function experiment_learning_rates(num_episodes::Int, num_runs::Int=5)
         avg_returns = mean(all_returns)
         actor_critic_results[α] = avg_returns
         
-        # Check if this is the best performance
+        # Show final performance metric
         final_perf = mean(avg_returns[end-99:end])
-        if final_perf > best_actor_critic_perf
-            best_actor_critic_perf = final_perf
-            best_actor_critic_α = α
-        end
+        println("  α = $α | Final Avg Return: $final_perf")
     end
     
     results["Actor-Critic"] = actor_critic_results
-    best_alphas["Actor-Critic"] = best_actor_critic_α
-    println("Best learning rate for Actor-Critic: $(best_actor_critic_α)")
     
-    return results, best_alphas
+    return results
 end
 
 # Run experiments to compare value-based vs policy gradient methods
@@ -727,12 +698,6 @@ function experiment_value_vs_policy(best_alphas::Dict, num_episodes::Int, num_ru
     γ = 0.95
     N = 10  # Grid size
     T = 200  # Maximum episode length
-    
-    # Get best learning rates
-    sarsa_α = best_alphas["SARSA"]
-    reinforce_α = best_alphas["REINFORCE"]
-    reinforce_baseline_α = best_alphas["REINFORCE with baseline"]
-    actor_critic_α = best_alphas["Actor-Critic"]
     
     # Results dictionaries
     value_based_results = Dict()
@@ -743,6 +708,10 @@ function experiment_value_vs_policy(best_alphas::Dict, num_episodes::Int, num_ru
     for n in [1, 2, 3]
         println("Running semi-gradient $n-step SARSA")
         all_returns = []
+        
+        # Each n-step variant with differen α this time
+        sarsa_α = best_alphas["$n-step SARSA"]
+        
         for run in 1:num_runs
             Random.seed!(38 + run * 95)
             env = GridWorld(N, T)
@@ -755,6 +724,11 @@ function experiment_value_vs_policy(best_alphas::Dict, num_episodes::Int, num_ru
     # Policy gradient methods
     println("== Running Policy Gradient methods ==")
     println("Running REINFORCE")
+
+    reinforce_α = best_alphas["REINFORCE"]
+    reinforce_baseline_α = best_alphas["REINFORCE with baseline"]
+    actor_critic_α = best_alphas["Actor-Critic"]
+
     all_returns = []
     for run in 1:num_runs
         Random.seed!(38 + run * 95)
@@ -852,26 +826,6 @@ function plot_value_vs_policy(value_results, policy_results, window_size=25)
     
     display(p)
     savefig(p, "value_vs_policy.png")
-    
-    # Calculate final performance
-    println("== Final Performance (last 100 episodes) ==")
-    println("Value-based methods:")
-    for algo_name in value_order
-        if haskey(value_results, algo_name)
-            returns = value_results[algo_name]
-            final_perf = mean(returns[end-99:end])
-            println("$algo_name: $final_perf")
-        end
-    end
-    
-    println("Policy gradient methods:")
-    for algo_name in policy_order
-        if haskey(policy_results, algo_name)
-            returns = policy_results[algo_name]
-            final_perf = mean(returns[end-99:end])
-            println("$algo_name: $final_perf")
-        end
-    end
 end
 
 ###########################################
@@ -880,18 +834,28 @@ end
 
 function main()
     # Number of episodes for each experiment
-    num_episodes = 150
+    num_episodes = 100
     
     # Number of runs for averaging results (due to high variance)
-    num_runs = 25
+    num_runs = 200
 
     # Moving average window
     window_size = 10
     
     # 1. Learning rate experiments
-    println("=== Running learning rate experiments ===")
-    lr_results, best_alphas = experiment_learning_rates(num_episodes, num_runs)
-    plot_learning_rates(lr_results, window_size)
+    # println("=== Running learning rate experiments ===")
+    # lr_results = experiment_learning_rates(num_episodes, num_runs)
+    # plot_learning_rates(lr_results, window_size)
+
+    # Hard-coded based on the plots from above
+    best_alphas = Dict(
+        "1-step SARSA" => 0.05,
+        "2-step SARSA" => 0.05,
+        "3-step SARSA" => 0.05,
+        "REINFORCE" => 0.05,
+        "REINFORCE with baseline" => 0.05,
+        "Actor-Critic" => 0.5
+    )
     
     # 2. Value-based vs Policy gradient experiments using best learning rates
     println("=== Running the main experiment ===")
