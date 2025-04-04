@@ -14,15 +14,15 @@
 - GPI: tabular, and migration to function approximation methods
 - TD methods: SARSA (n-step bootstrapping) and Q-Learning (clever off-policy)
 - I.S. (requires more readings)
-- gradient vs semi-gradient (requires more readings)
+- gradient vs semi-gradient
 - Policy derived from value (GPI) vs direct policy optimization (policy-gradient)
 - Actor-critic
-- forward view vs. backward view (requires more readings)
+- forward view vs. backward view
 - MC-TD(0) spectrum
-- Eligibility traces (requires more readings)
-- TD($\lambda$) unifying the MC-TD(0) spectrum (requires more readings)
+- Eligibility traces
+- TD($\lambda$) unifying the MC-TD(0) spectrum
 - planning (requires more readings)
-- DQN (requires more readings)
+- DQN
 
 ### Concepts experienced through the projects:
 
