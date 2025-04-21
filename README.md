@@ -1,6 +1,6 @@
-## Repo to keep track of my RL progression during MT7051-VT25 course and beyond
+## Repo to keep track of RL progress during MT7051-VT25 course and beyond
 
-### Theory concepts that I feel comfortable talking about after the course (except for those marked with "requires more readings"):
+### Theory concepts that I feel comfortable talking about after the course (except for those marked with "requires more reading"):
 - MDPs
 - DP as idealized ($p(s',r | s,a)$ is entirely known) foundation for more practical methods
 - model-free vs. model-based
@@ -13,15 +13,15 @@
 - bias-varience trade-off (I like to relate to it as speed-accuracy)
 - GPI: tabular, and migration to function approximation methods
 - TD methods: SARSA (n-step bootstrapping) and Q-Learning (clever off-policy)
-- I.S. (requires more readings)
+- I.S. (requires more reading)
 - gradient vs semi-gradient
 - Policy derived from value (GPI) vs direct policy optimization (policy-gradient)
 - Actor-critic
 - forward view vs. backward view
 - MC-TD(0) spectrum
-- Eligibility traces
+- Eligibility traces (requires more reading)
 - TD($\lambda$) unifying the MC-TD(0) spectrum
-- planning (requires more readings)
+- planning (requires more reading)
 - DQN
 
 ### Concepts experienced through the projects:
