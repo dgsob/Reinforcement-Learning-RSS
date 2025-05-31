@@ -1,6 +1,10 @@
 ## Repo to keep track of RL progress during MT7051-VT25 course and beyond
 
-### Theory concepts that I feel comfortable talking about after the course (except for those marked with "requires more reading"):
+## After the course:
+
+
+## From the course:
+### Theory concepts:
 - MDPs
 - DP as idealized ($p(s',r | s,a)$ is entirely known) foundation for more practical methods
 - model-free vs. model-based
