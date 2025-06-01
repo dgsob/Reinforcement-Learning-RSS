@@ -35,6 +35,10 @@ function calculate_reward(sol_score, stru_score)
     return 0.5 * sol_score + 0.5 * stru_score - 0.01  # weighted reward with penalty
 end
 
+function calculate_reward(sol_score)
+    return sol_score - 0.01  # TODO: Rewrite reward function to something better
+end
+
 function step!(env::PeptideSequenceEnv, action::Vector{Int})
     env.step_count += 1
     if length(action) == env.n && all(1 .<= action .<= length(AMINO_ACIDS))
@@ -46,8 +50,8 @@ function step!(env::PeptideSequenceEnv, action::Vector{Int})
     # Evaluate with real tools
     sequence_str = sequence_to_string(env.sequence)
     solubility_score = get_solubility(sequence_str)
-    structure_score = get_secondary_structure(sequence_str)
-    reward = calculate_reward(solubility_score, structure_score)
+    # structure_score = get_secondary_structure(sequence_str)
+    reward = calculate_reward(solubility_score)
     if reward >= env.target_reward
         env.done = true
     elseif env.step_count >= env.max_steps
