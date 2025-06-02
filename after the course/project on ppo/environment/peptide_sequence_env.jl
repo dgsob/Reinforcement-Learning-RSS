@@ -31,12 +31,18 @@ function sequence_to_string(seq::Vector{Int})
     return join(AMINO_ACIDS[seq], "")
 end
 
-function calculate_reward(sol_score, stru_score)
-    return 0.5 * sol_score + 0.5 * stru_score - 0.01  # weighted reward with penalty
-end
+# function calculate_reward(sol_score, stru_score)
 
-function calculate_reward(sol_score)
-    return sol_score - 0.01  # TODO: Rewrite reward function to something better
+# end
+
+# Non-linear transformation using a sigmoid-like function
+function calculate_reward(sol_score::Float64)
+    sol_score = clamp(sol_score, 0.0, 1.0)  # ensure the solubility score is within [0, 1]
+    steepness = 10.0  # controls how steep the sigmoid is
+    threshold = 0.5   # solubility threshold
+    scaled_reward = 1.0 / (1.0 + exp(-steepness * (sol_score - threshold)))
+    
+    return 2.0 * scaled_reward - 1.0  # shift and scale the reward to range from -1 to 1
 end
 
 function step!(env::PeptideSequenceEnv, action::Vector{Int})
