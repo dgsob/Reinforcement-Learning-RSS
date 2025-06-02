@@ -1,10 +1,13 @@
 using HTTP
 using Gumbo
 using Cascadia
+using Logging
+
+global_logger(ConsoleLogger(stderr, Logging.Info))
 
 include("./environment/peptide_sequence_env.jl")
-include("./environment/solubility_api.jl")
-include("./environment/secondary_structure_api.jl")
+include("./environment/solubility/proteinsol_api.jl")
+include("./environment/secondary structure/pep2d_api.jl")
 
 # Test function to evaluate solubility API
 function run_test()

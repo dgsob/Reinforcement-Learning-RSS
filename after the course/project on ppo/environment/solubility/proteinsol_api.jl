@@ -42,7 +42,7 @@ function get_solubility(sequence::String)
         # Submit the sequence and get the initial response
         response = HTTP.post(submit_url, headers, body; redirect=false, require_ssl_verification=false)
         response_body_str = String(response.body)
-        # @debug "Initial response: $response_body_str"
+        @debug "Initial response: $response_body_str"
         # Check for redirect in the response
         if response.status == 200 && occursin("window.location", response_body_str)
             # Extract the timestamp
@@ -58,7 +58,7 @@ function get_solubility(sequence::String)
                     try
                         results_response = HTTP.get(redirect_url; retries=2, require_ssl_verification=false)
                         results_body_str = String(results_response.body)
-                        # @debug "Results response (Attempt $attempt): $results_body_str"
+                        @debug "Results response (Attempt $attempt): $results_body_str"
 
                         # Parse the results HTML
                         html = parsehtml(results_body_str)
