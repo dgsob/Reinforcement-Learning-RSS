@@ -73,7 +73,7 @@ function gae(states, next_states, rewards, dones, critic, ϕ, ζ, timesteps_for_
         next_state_input = state_to_onehot(next_states[t], num_amino_acids)
 
         v_t, _ = critic(state_input, ϕ, ζ)
-        v_t_next, _ = dones[t] ? 0.0f0 : critic(next_state_input, ϕ, ζ)
+        v_t_next, _ = dones[t] ? (0.0f0, nothing) : critic(next_state_input, ϕ, ζ)
 
         δ_t = rewards[t] + gamma * v_t_next - v_t
         A_hat[t] = δ_t + (t < timesteps_for_epoch ? gamma * gae_lambda * A_hat[t+1] : 0.0f0)
@@ -122,10 +122,10 @@ end
 
 # PPO Training Function with Shuffled Minibatches
 function train_ppo(; 
-    n_iterations::Int=2, 
-    timesteps_for_epoch::Int=2, 
-    epochs::Int=10, 
-    minibatch_size::Int=2, 
+    n_iterations::Int=16, 
+    timesteps_for_epoch::Int=16, 
+    epochs::Int=16, 
+    minibatch_size::Int=4, 
     clip_ratio::Float32=0.2f0, 
     policy_lr::Float32=3.0f-4, 
     value_lr::Float32=1.0f-3, 

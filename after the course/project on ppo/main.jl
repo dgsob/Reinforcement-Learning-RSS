@@ -5,9 +5,8 @@ using Logging
 
 global_logger(ConsoleLogger(stderr, Logging.Info))
 
+include("environment/bp_score.jl")
 include("./environment/peptide_sequence_env.jl")
-include("./environment/solubility/proteinsol_api.jl")
-include("./environment/secondary structure/pep2d_api.jl")
 include("./ppo.jl")
 
 # Test function to train PPO and evaluate the trained policy
@@ -15,7 +14,7 @@ function test_ppo_training_and_evaluation()
     println("Starting PPO training and evaluation...")
 
     # Initialize environment
-    env = PeptideSequenceEnv(n=21, max_steps=10, target_reward=0.9f0)
+    env = PeptideSequenceEnv(n=6, max_steps=10, target_reward=1.0f0)
     println("Environment initialized with sequence length: $(env.n)")
 
     # Run PPO training

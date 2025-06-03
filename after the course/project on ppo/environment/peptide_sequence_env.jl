@@ -11,10 +11,7 @@ mutable struct PeptideSequenceEnv
     target_reward::Float32  # Threshold for "good" peptide
 
     # Constructor
-    function PeptideSequenceEnv(; n::Int=21, max_steps::Int=50, target_reward::Float32=0.9f0)
-        if n < 21
-            error("Sequence length must be at least 21 amino acids for Protein-Sol compatibility")
-        end
+    function PeptideSequenceEnv(; n::Int=6, max_steps::Int=50, target_reward::Float32=0.9f0)
         sequence = rand(1:length(AMINO_ACIDS), n)  # Uniformly random initial sequence
         new(n, sequence, max_steps, 0, false, target_reward)
     end
@@ -55,9 +52,8 @@ function step!(env::PeptideSequenceEnv, action::Vector{Int})  # TODO: Rewrite to
 
     # Evaluate with real tools
     sequence_str = sequence_to_string(env.sequence)
-    solubility_score = get_solubility(sequence_str)
-    # structure_score = get_secondary_structure(sequence_str)
-    reward = calculate_reward(solubility_score)
+    bp_score = get_binding_propensity_score(sequence_str)
+    reward = calculate_reward(bp_score)
     if reward >= env.target_reward
         env.done = true
     elseif env.step_count >= env.max_steps
