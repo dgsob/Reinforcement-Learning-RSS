@@ -45,7 +45,7 @@ function calculate_reward(sol_score::Float64)
     return 2.0 * scaled_reward - 1.0  # shift and scale the reward to range from -1 to 1
 end
 
-function step!(env::PeptideSequenceEnv, action::Vector{Int})
+function step!(env::PeptideSequenceEnv, action::Vector{Int})  # TODO: Rewrite to accept GA-like actions later if necessary
     env.step_count += 1
     if length(action) == env.n && all(1 .<= action .<= length(AMINO_ACIDS))
         env.sequence = action
