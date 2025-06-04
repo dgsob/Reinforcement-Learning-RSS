@@ -19,7 +19,7 @@ function test_ppo_training_and_evaluation()
 
     # Run PPO training
     println("Training PPO...")
-    actor, critic, θ, ξ, ϕ, ζ = train_ppo()
+    actor, critic, θ, ξ, ϕ, ζ = train_ppo(policy_lr=1.0f-2, value_lr=1.0f-1)
     println("PPO training completed.")
 
     # Evaluate the trained policy
