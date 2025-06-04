@@ -17,7 +17,9 @@ function sample_action(policy, state, θ, ξ, rng)
     logits, _ = policy(state_input, θ, ξ)
     action = zeros(Int, length(state))
     for i in 1:length(state)
-        probs = softmax(logits[:, i])
+        # @debug "Logits: $(logits[:, i])"
+        logits_stable = logits[:, i] .- maximum(logits[:, i])  # subtract the maximum to prevent overflow
+        probs = softmax(logits_stable)
         action[i] = rand(rng, Categorical(probs))
     end
     return action
@@ -30,7 +32,7 @@ function log_prob(policy, state, action, θ, ξ)
     logp = 0.0
     for i in eachindex(action)
         probs = softmax(logits[:, i])
-        logp += log(probs[action[i]])
+        logp += log(probs[action[i]] + 1e-8)  # Add small ε to avoid log(0)
     end
     return logp
 end
@@ -83,6 +85,18 @@ function gae(states, next_states, rewards, dones, critic, ϕ, ζ, timesteps_for_
     return A_hat, R_hat
 end
 
+function clip_gradients(grads, clip_value=1.0)
+    if grads isa Nothing
+        return grads
+    elseif grads isa AbstractArray
+        return clamp.(grads, -clip_value, clip_value)
+    elseif grads isa NamedTuple
+        return map(g -> clip_gradients(g, clip_value), grads)
+    else
+        return grads
+    end
+end
+
 # Optimize policy and value networks for a single minibatch
 function optimize_networks(state, action, advantage, return_value, actor, θ, ξ, critic, ϕ, ζ, actor_optimizer_state, critic_optimizer_state, clip_ratio)
     # Compute old log probability (before update)
@@ -91,14 +105,17 @@ function optimize_networks(state, action, advantage, return_value, actor, θ, ξ
     # Policy loss
     function policy_clip_loss(θ_new)
         log_prob_new = log_prob(actor, state, action, θ_new, ξ)
-        r_θ = exp(log_prob_new - log_prob_old)  # compute probability ratio
+        r_θ = exp(clamp(log_prob_new - log_prob_old, -10, 10))  # compute probability ratio, clamp to prevent explosion
         clipped = clamp(r_θ, 1 - clip_ratio, 1 + clip_ratio) * advantage
         return -min(r_θ * advantage, clipped)
     end
 
     # Update policy network weights
-    loss, grads = Zygote.withgradient(θ -> policy_clip_loss(θ), θ)
-    actor_optimizer_state, θ = Optimisers.update(actor_optimizer_state, θ, grads[1])
+    # @debug "Policy Weights: $(θ)"
+    loss_θ, grads_θ = Zygote.withgradient(θ -> policy_clip_loss(θ), θ)
+    # @debug "Policy Gradients: $(grads_θ[1])"
+    grads_θ_clipped = clip_gradients(grads_θ[1], 2.0)
+    actor_optimizer_state, θ = Optimisers.update(actor_optimizer_state, θ, grads_θ_clipped)
 
     # Value loss
     function value_loss(ϕ_new)
@@ -108,10 +125,11 @@ function optimize_networks(state, action, advantage, return_value, actor, θ, ξ
     end
 
     # Update value network weights
-    loss, grads = Zygote.withgradient(ϕ -> value_loss(ϕ), ϕ)
-    critic_optimizer_state, ϕ = Optimisers.update(critic_optimizer_state, ϕ, grads[1])
+    loss_ϕ, grads_ϕ = Zygote.withgradient(ϕ -> value_loss(ϕ), ϕ)
+    grads_ϕ_clipped = clip_gradients(grads_ϕ[1], 2.0)
+    critic_optimizer_state, ϕ = Optimisers.update(critic_optimizer_state, ϕ, grads_ϕ_clipped)
 
-    return actor_optimizer_state, θ, critic_optimizer_state, ϕ
+    return actor_optimizer_state, θ, critic_optimizer_state, ϕ, loss_θ, loss_ϕ
 end
 
 function get_minibatch_indices(minibatch_idx, minibatch_size, timesteps_for_epoch, shuffled_indices)
@@ -127,8 +145,8 @@ function train_ppo(;
     epochs::Int=16, 
     minibatch_size::Int=4, 
     clip_ratio::Float32=0.2f0, 
-    policy_lr::Float32=3.0f-4, 
-    value_lr::Float32=1.0f-3, 
+    policy_lr::Float32=1.0f-3, 
+    value_lr::Float32=1.0f-2, 
     gamma::Float32=0.99f0, 
     gae_lambda::Float32=0.95f0
 )
@@ -151,10 +169,11 @@ function train_ppo(;
     critic_optimizer_state = Optimisers.setup(critic_optimizer, ϕ)
 
     for iteration in 1:n_iterations
-        println("Iteration $iteration/$n_iterations")
-
         # (a) Collect trajectories
         states, actions, rewards, next_states, dones = collect_trajectories(env, actor, θ, ξ, rng, timesteps_for_epoch)
+
+        # Compute average reward for this iteration
+        avg_reward = round(mean(rewards), digits=2)
 
         # (b) Compute advantages and returns using GAE
         A_hat, R_hat = gae(states, next_states, rewards, dones, critic, ϕ, ζ, timesteps_for_epoch, gamma, gae_lambda)
@@ -165,19 +184,36 @@ function train_ppo(;
         # (d) Optimize Surrogate Objective with shuffled minibatches
         shuffled_indices = shuffle(1:timesteps_for_epoch)
         num_minibatches = ceil(Int, timesteps_for_epoch / minibatch_size)
+        
+        # Track losses over the iteration
+        total_policy_loss = 0.0
+        total_value_loss = 0.0
+        num_updates = 0
 
         for epoch_idx in 1:epochs
             for minibatch_idx in 1:num_minibatches
                 minibatch_indices = get_minibatch_indices(minibatch_idx, minibatch_size, timesteps_for_epoch, shuffled_indices)
 
                 for i in minibatch_indices
-                    actor_optimizer_state, θ, critic_optimizer_state, ϕ = optimize_networks(
+                    # Update networks and collect losses
+                    actor_optimizer_state, θ, critic_optimizer_state, ϕ, policy_loss, value_loss = optimize_networks(
                         states[i], actions[i], A_hat[i], R_hat[i], actor, θ, ξ, critic, ϕ, ζ, 
                         actor_optimizer_state, critic_optimizer_state, clip_ratio
                     )
+                    total_policy_loss += policy_loss
+                    total_value_loss += value_loss
+                    num_updates += 1
                 end
             end  # (minibatch)
         end  # (epoch)
+
+        # Compute average losses
+        avg_policy_loss = total_policy_loss / num_updates
+        avg_value_loss = total_value_loss / num_updates
+
+        # Print iteration progress with tracked metrics
+        println("Iteration $iteration/$n_iterations | Avg Reward: $avg_reward | Avg Policy Loss: $avg_policy_loss | Avg Value Loss: $avg_value_loss")
+
     end  # (iteration)
 
     return actor, critic, θ, ξ, ϕ, ζ

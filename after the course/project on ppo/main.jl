@@ -28,7 +28,7 @@ function test_ppo_training_and_evaluation()
     println("Initial sequence: ", sequence_to_string(state))
 
     # Run a few steps using the trained actor
-    for step in 1:5
+    for step in 1:10
         # Sample an action using the trained actor
         action = sample_action(actor, state, θ, ξ, Random.default_rng())
 
